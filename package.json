@@ -1,0 +1,9 @@
+{
+  "name": "placard",
+  "private": true,
+  "type": "module",
+  "description": "A house manual on stickers. Tap one for what to do.",
+  "scripts": {
+    "test": "node --test test/*.test.mjs && node test/e2e.mjs"
+  }
+}

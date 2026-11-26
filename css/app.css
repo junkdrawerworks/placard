@@ -1,0 +1,24 @@
+/* Placard: an enamel sign, navy and cream. */
+:root { --accent: #23395B; --accent-ink: #FBF6EA; --tape: #23395B; --tape-ink: #FBF6EA; --tape-edge: #14223A; }
+@media (prefers-color-scheme: dark) { :root { --accent: #C9D6EE; --accent-ink: #12192A; --tape: #2E4A75; --tape-edge: #0E1726; } }
+.lead { font-size: 19px; margin: 0 0 14px; }
+.where { margin: -4px 0 12px; }
+.crumb { margin: 0 0 8px; font-size: 15px; } .crumb a { color: var(--ink2); text-decoration: none; }
+ol.steps { padding-left: 0; margin: 0 0 14px; list-style: none; counter-reset: st; }
+ol.steps li { counter-increment: st; position: relative; padding: 10px 12px 10px 48px; margin: 0 0 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+ol.steps li::before { content: counter(st); position: absolute; left: 12px; top: 9px; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font: 700 16px/26px var(--display); text-align: center; }
+.urgent { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 0 0 14px; }
+.urgent-tile { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-radius: 12px; background: var(--bad-soft); color: var(--bad); text-decoration: none; border: 2px solid transparent; }
+.urgent-tile b { font: 700 20px/1.1 var(--display); text-transform: uppercase; }
+.urgent-tile span { font-size: 14px; color: var(--ink2); }
+.contact .who { font-weight: 600; margin: 0 0 4px; }
+.owner { border-style: dashed; margin-top: 22px; }
+#edit-link { font-size: 15px; }
+.report p { margin: 0 0 6px; }
+.qr-sheet { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.qr-card { display: flex; gap: 10px; align-items: center; background: #fff; color: #000; border: 1px dashed #999; border-radius: 8px; padding: 8px; break-inside: avoid; }
+.qr-card .qr svg { display: block; }
+.qr-card b { display: block; font: 700 20px/1.05 var(--display); text-transform: uppercase; margin-bottom: 4px; }
+.qr-card span { display: block; font-size: 13px; line-height: 1.3; }
+.qr-card small { display: block; font-size: 11px; color: #555; margin-top: 4px; }
+@media print { .qr-sheet { grid-template-columns: 1fr 1fr; gap: 4mm; } .qr-card { width: 88mm; height: 52mm; } }
