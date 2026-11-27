@@ -28,8 +28,10 @@ test('phone numbers and https links in a page\'s text are marked, and nothing el
   assert.deepEqual(links('Call 845-555-0100 ext. 12 days, (845) 555.0199 nights'), [['845-555-0100', 'tel:8455550100'], ['(845) 555.0199', 'tel:8455550199']]);
   assert.deepEqual(links('The manual: https://example.com/valve.pdf.'), [['https://example.com/valve.pdf', 'https://example.com/valve.pdf']]);
   assert.equal(splitLinks('See https://example.com/a. Then call.').map(p => p.text).join(''), 'See https://example.com/a. Then call.', 'text was lost');
-  for (const t of ['16 × 25 × 1', 'XE50T10', 'SN 123-4567-89', '2026-11-27', 'Model 410 2020', '1234-5678', 'http://example.com', 'Breakers 21 and 23'])
+  for (const t of ['16 × 25 × 1', 'XE50T10', 'SN 123-4567-89', '2026-11-27', 'Model 410 2020', '1234-5678', 'http://example.com', 'Breakers 21 and 23',
+    'Heater 120-1500 W', 'Tank 80 gal (303-1100 lb full)', 'Elevation 750.1234 ft'])
     assert.deepEqual(links(t), [], t);
+  assert.deepEqual(links('Call 555-0142 in an emergency.'), [['555-0142', 'tel:5550142']], 'a number before "in" isn\'t a link');
   // nothing in the sample house is a link: its models, sizes, breakers and years stay text
   for (const d of SAMPLE['placard.site']) for (const v of [d.where, d.summary, d.steps, d.care, d.warn, d.notes, ...(d.facts || []).flat()])
     assert.deepEqual(links(v), [], v);
