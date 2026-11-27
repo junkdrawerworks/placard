@@ -52,6 +52,11 @@ export async function tenantChecks({ browser, base, assert }) {
     // nothing kept yet and Google never answering (one bar): after 12 s the page says there's no connection
     L.hang = true;
     await page.goto(base + '#water-heater');
+    // and on the way, after 6 s, that it's taking longer than usual
+    await page.waitForTimeout(3000);
+    assert.equal(await text('#app'), 'Loading the house manual… The first time takes a few seconds.');
+    await page.waitForTimeout(4000);
+    assert.equal(await text('#app'), 'Loading the house manual… The first time takes a few seconds. Taking longer than usual.');
     await page.waitForSelector('text=No connection.', { timeout: 16000 });
     unhang();
     // nothing kept yet and the ledger slow to answer: the page says it's loading, then fills in

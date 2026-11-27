@@ -71,11 +71,13 @@ async function load() {
 // reads again when the phone comes back online or the page is looked at again, and every 20 s while it says so. A good
 // read ends it.
 const PUBLIC = 'placard.public', AGAIN = 20000;
-let reading = null, again = null;
+// Google gives up after 12 s (No connection); after 6 s the loading line says it's slow.
+let reading = null, again = null, slow = false;
 function readPublic() {
   if (reading) return reading;
   clearTimeout(again);
-  if (!site.length && !loading) { loading = true; render(); }
+  if (!site.length && !loading) { loading = true; slow = false; render(); }
+  const slowly = setTimeout(() => { slow = true; if (loading) render(); }, 6000);
   reading = (async () => {
     try {
       const docs = await publicRead(LEDGER_URL, 'placard', 'site');
@@ -84,7 +86,7 @@ function readPublic() {
     } catch (e) {
       if (site.length) stale = 'offline'; else siteError = 'offline';
       again = setTimeout(readPublic, AGAIN);
-    } finally { loading = false; reading = null; }
+    } finally { loading = false; reading = null; clearTimeout(slowly); }
     render();
   })();
   return reading;
@@ -455,7 +457,7 @@ function render() {
   const r = route();
   document.body.classList.toggle('is-owner', owner());
   let body;
-  if (!owner() && !site.length && loading) body = [h('div', { class: 'notice' }, h('p', {}, h('b', {}, 'Loading the house manual… '), 'The first time takes a few seconds.'))];
+  if (!owner() && !site.length && loading) body = [h('div', { class: 'notice' }, h('p', {}, h('b', {}, 'Loading the house manual… '), 'The first time takes a few seconds.', slow ? ' Taking longer than usual.' : ''))];
   else if (!owner() && !site.length && siteError === 'unset') body = [h('div', { class: 'notice' }, h('p', {}, h('b', {}, 'Not published yet. '), 'This house manual hasn\'t been put online. If you tapped a sticker, please call the number you were given.'))];
   else if (!owner() && !site.length && siteError === 'offline') body = [h('div', { class: 'notice warn' }, h('p', {}, h('b', {}, 'No connection. '), 'The house manual needs a signal the first time. Try again near a window, or call the number you were given.'), tryAgain())];
   else if (r.view === 'owner' && owner()) body = renderOwner();
