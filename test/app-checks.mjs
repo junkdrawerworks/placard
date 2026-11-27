@@ -211,6 +211,7 @@ export async function appChecks({ page, ctx, base, assert }) {
   await page.goto(base + '?demo#/reports');
   await page.click('text=Mark handled');
   await page.waitForSelector('.report.dim');
+  assert.ok(await page.locator('.report.dim').evaluate(el => Number(getComputedStyle(el).opacity)) < 1, 'a handled report isn\'t greyed out');
 }
 
 // On Letter with 0.4 in margins the page is 739 px across: the printed thing fits inside it, nothing else prints, and a
