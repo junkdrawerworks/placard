@@ -28,11 +28,11 @@ export const STARTER = [
 ].map(([id, name, kind, emergency], i) => ({ id, name, kind, emergency: !!emergency, order: i + 1 }));
 
 // "Label: value" lines to [[label, value], …] and back. The label ends at the first colon with a space after it, or one
-// with neither // nor a digit after it ("Model:XE50T10"), so a link ("https://…/valve.pdf") or a time ("Pumped
-// 10:30 am") on a line of its own stays one value.
+// with no space that isn't a link's :// or a time's digit:digit ("Model:XE50T10", "Breakers:21 and 23"), so a link
+// ("https://…/valve.pdf") or a time ("Pumped 10:30 am") on a line of its own stays one value.
 export function parseFacts(text) {
   return String(text || '').split('\n').map(l => l.trim()).filter(Boolean).map(l => {
-    const m = /^(.+?):(?: |(?!\/\/|\d))/.exec(l);
+    const m = /^(.+?):(?: |(?!\/\/)(?!(?<=\d:)\d))/.exec(l);
     return m ? [m[1].trim(), l.slice(m[0].length).trim()] : ['', l];
   });
 }

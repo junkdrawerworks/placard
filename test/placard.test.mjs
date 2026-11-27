@@ -8,9 +8,10 @@ test('details lines round-trip', () => {
   assert.equal(factsText(f), 'Model: XE50T10\nFilter: 16 × 25 × 1\nno colon here\nTime: 3:30');
 });
 test('a link or a time on a details line of its own stays one value, and survives an edit', () => {
-  const f = parseFacts('https://example.com/valve-manual.pdf\nPumped 10:30 am Tuesdays\nManual: https://example.com/m.pdf\nModel:XE50T10\nFilter:\nAlso: 1:30 or 2:45');
+  const f = parseFacts('https://example.com/valve-manual.pdf\nPumped 10:30 am Tuesdays\nManual: https://example.com/m.pdf\nModel:XE50T10\nFilter:\nAlso: 1:30 or 2:45\n' +
+    'Breakers:21 and 23\nSize:200 A\nTime: 10:30');
   assert.deepEqual(f, [['', 'https://example.com/valve-manual.pdf'], ['', 'Pumped 10:30 am Tuesdays'], ['Manual', 'https://example.com/m.pdf'],
-    ['Model', 'XE50T10'], ['Filter', ''], ['Also', '1:30 or 2:45']]);
+    ['Model', 'XE50T10'], ['Filter', ''], ['Also', '1:30 or 2:45'], ['Breakers', '21 and 23'], ['Size', '200 A'], ['Time', '10:30']]);
   assert.deepEqual(parseFacts(factsText(f)), f, 'a second edit changed the details');
 });
 test('Call dials the first number, without its extension', () => {
