@@ -16,14 +16,15 @@ const fakeNfc = () => {
 };
 // A phone on a published manual: js/config.js as served carries a ledger address (published: true), and a pretend
 // ledger answers it with the sample house. L.down: every request fails; L.delay: each waits that long (Google waking
-// the script); L.emailed: what a report's answer says. The service worker is off, so every request reaches the routes.
+// the script); L.hang: Google takes each request and never answers (one bar); L.emailed: what a report's answer says. The service worker is off, so every request reaches the routes.
 async function phone(browser, base, { published = true, dark = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true,
     colorScheme: dark ? 'dark' : 'light', serviceWorkers: 'block' });
-  const L = { down: false, delay: 0, emailed: true, reports: [], puts: [], site: structuredClone(SAMPLE['placard.site']) };
+  const L = { down: false, delay: 0, hang: false, held: [], emailed: true, reports: [], puts: [], site: structuredClone(SAMPLE['placard.site']) };
   if (published) await ctx.route(base + 'js/config.js', async r => r.fulfill({ contentType: 'text/javascript',
     body: (await readFile(join(root, 'js/config.js'), 'utf8')).replace("LEDGER_URL = ''", `LEDGER_URL = '${LEDGER}'`) }));
   await ctx.route('https://script.google.com/**', async r => {
+    if (L.hang) { await new Promise(res => L.held.push(res)); return r.abort().catch(() => {}); }   // taken, never answered
     if (L.delay) await new Promise(res => setTimeout(res, L.delay));
     if (L.down) return r.abort('internetdisconnected');
     const req = r.request(), json = o => r.fulfill({ contentType: 'application/json', body: JSON.stringify(o) });
@@ -46,10 +47,16 @@ async function phone(browser, base, { published = true, dark = false } = {}) {
 export async function tenantChecks({ browser, base, assert }) {
   const { ctx, L, errors, page } = await phone(browser, base);
   const text = sel => page.locator(sel).evaluate(el => el.textContent.replace(/\s+/g, ' ').trim());
+  const unhang = () => { L.hang = false; L.held.splice(0).forEach(res => res()); };
   try {
+    // nothing kept yet and Google never answering (one bar): after 12 s the page says there's no connection
+    L.hang = true;
+    await page.goto(base + '#water-heater');
+    await page.waitForSelector('text=No connection.', { timeout: 16000 });
+    unhang();
     // nothing kept yet and the ledger slow to answer: the page says it's loading, then fills in
     L.delay = 2500;
-    await page.goto(base + '#water-heater');
+    await page.reload();
     await page.waitForTimeout(600);
     assert.match(await text('#app'), /^Loading the house manual…/, 'a first tap shows a blank page while the ledger wakes up');
     await page.waitForSelector('.tape >> text=Water heater', { timeout: 8000 });
@@ -79,8 +86,15 @@ export async function tenantChecks({ browser, base, assert }) {
     await page.waitForSelector('.tape >> text=Water heater');
     await page.click('text=Report a problem or log a visit');
     assert.deepEqual([await page.inputValue('dialog[open] #f-text'), await page.inputValue('dialog[open] #f-name')], ['Water on the floor under the tank', 'Pat'], 'the unsent report was lost');
+    // on one bar that never answers: after 20 s it says so, keeps the text and offers Text it instead
+    L.delay = 0; L.down = false; L.hang = true;
+    await page.click('dialog[open] button[type=submit]');
+    await page.waitForSelector('dialog[open] .msg.bad', { timeout: 25000 });
+    assert.equal(await text('dialog[open] .msg.bad'), 'Couldn\'t send it. Your message is kept: try again, or call.');
+    assert.equal(await page.locator('dialog[open] a.sms').isVisible(), true);
+    assert.equal(await page.inputValue('dialog[open] #f-text'), 'Water on the floor under the tank');
+    unhang();
     // the signal is back: it goes, the form closes, and a line stays on the page
-    L.delay = 0; L.down = false;
     await page.click('dialog[open] button[type=submit]');
     await page.waitForSelector('.toast.show >> text=Sent. The owner gets it by email.');
     assert.equal(await page.locator('dialog[open]').count(), 0);
