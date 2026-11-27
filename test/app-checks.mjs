@@ -47,8 +47,13 @@ export async function tenantChecks({ browser, base, assert }) {
   const { ctx, L, errors, page } = await phone(browser, base);
   const text = sel => page.locator(sel).evaluate(el => el.textContent.replace(/\s+/g, ' ').trim());
   try {
+    // nothing kept yet and the ledger slow to answer: the page says it's loading, then fills in
+    L.delay = 2500;
     await page.goto(base + '#water-heater');
-    await page.waitForSelector('.tape >> text=Water heater');
+    await page.waitForTimeout(600);
+    assert.match(await text('#app'), /^Loading the house manual…/, 'a first tap shows a blank page while the ledger wakes up');
+    await page.waitForSelector('.tape >> text=Water heater', { timeout: 8000 });
+    L.delay = 0;
     // the report form: an urgent line with the number to call, and the field only robots fill in, out of sight
     await page.click('text=Report a problem or log a visit');
     assert.equal(await text('dialog .call-now'), 'Urgent? Call 555-0142 now.');

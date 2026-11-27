@@ -15,6 +15,7 @@ const owner = () => ledger.connected;
 const app = $('#app');
 let site = [];          // the docs everyone sees
 let siteError = '';
+let loading = false;    // a tenant's first visit, nothing kept yet, waiting on the ledger
 
 const jget = k => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; } };
 const jset = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
@@ -31,11 +32,14 @@ async function load() {
     return;
   } else {
     site = jget('placard.public') || [];
-    if (site.length) render();
     if (!LEDGER_URL) { siteError = 'unset'; }
     else {
+      // The copy kept from last time straight away; with none, a line while Google wakes the script (a few seconds).
+      loading = !site.length;
+      render();
       try { site = await publicRead(LEDGER_URL, 'placard', 'site'); jset('placard.public', site); siteError = ''; }
       catch (e) { siteError = site.length ? '' : 'offline'; }
+      loading = false;
     }
   }
   render();
@@ -345,7 +349,8 @@ function render() {
   const r = route();
   document.body.classList.toggle('is-owner', owner());
   let body;
-  if (!owner() && !site.length && siteError === 'unset') body = [h('div', { class: 'notice' }, h('p', {}, h('b', {}, 'Not published yet. '), 'This house manual hasn\'t been put online. If you tapped a sticker, please call the number you were given.'))];
+  if (!owner() && !site.length && loading) body = [h('div', { class: 'notice' }, h('p', {}, h('b', {}, 'Loading the house manual… '), 'The first time takes a few seconds.'))];
+  else if (!owner() && !site.length && siteError === 'unset') body = [h('div', { class: 'notice' }, h('p', {}, h('b', {}, 'Not published yet. '), 'This house manual hasn\'t been put online. If you tapped a sticker, please call the number you were given.'))];
   else if (!owner() && !site.length && siteError === 'offline') body = [h('div', { class: 'notice warn' }, h('p', {}, h('b', {}, 'No connection. '), 'The house manual needs a signal the first time. Try again near a window, or call the number you were given.'))];
   else if (r.view === 'owner' && owner()) body = renderOwner();
   else if (r.view === 'print' && owner()) body = renderPrint();
