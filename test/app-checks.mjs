@@ -69,7 +69,26 @@ export async function appChecks({ page, base, assert }) {
   await page.goto(base + '?demo#/print');
   await page.waitForSelector('.qr-card svg');
   assert.equal(await page.locator('.qr-card').count(), 5);
+  await printChecks(page, assert, '.qr-card');
   await page.goto(base + '?demo#/reports');
   await page.click('text=Mark handled');
   await page.waitForSelector('.report.dim');
+}
+
+// On Letter with 0.4 in margins the page is 739 px across: the printed thing fits inside it, nothing else prints, and a
+// browser in dark mode prints the light palette.
+export async function printChecks(page, assert, sel) {
+  for (const colorScheme of ['light', 'dark']) {
+    await page.setViewportSize({ width: 739, height: 1000 });
+    await page.emulateMedia({ media: 'print', colorScheme });
+    const p = await page.evaluate(sel => ({
+      right: Math.max(...[...document.querySelectorAll(sel)].map(c => c.getBoundingClientRect().right)),
+      shown: ['header.top', '#edit-link', '#demo-note', '.no-print', '.sync', '.jd-foot'].filter(s => [...document.querySelectorAll(s)].some(el => el.getClientRects().length)),
+      ink: getComputedStyle(document.documentElement).getPropertyValue('--ink').trim(), bg: getComputedStyle(document.body).backgroundColor }), sel);
+    assert.ok(p.right > 0 && p.right <= 739, `${colorScheme}: ${sel} reaches ${Math.round(p.right)} px of the 739 px printable width`);
+    assert.deepEqual(p.shown, [], `${colorScheme}: printed beside the ${sel}`);
+    assert.deepEqual([p.ink, p.bg], ['#000', 'rgb(255, 255, 255)'], `${colorScheme}: not the light palette in print`);
+  }
+  await page.emulateMedia({ media: null, colorScheme: null });
+  await page.setViewportSize({ width: 390, height: 844 });
 }
