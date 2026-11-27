@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseFacts, factsText, lines, STARTER, SAMPLE, checkPage, mergeFacts, mergeImport, dial } from '../js/starter.js';
+import { parseFacts, factsText, lines, STARTER, SAMPLE, checkPage, mergeFacts, mergeImport, dial, splitLinks } from '../js/starter.js';
 
 test('details lines round-trip', () => {
   const f = parseFacts('Model: XE50T10\n\nFilter: 16 × 25 × 1\nno colon here\nTime: 3:30');
@@ -17,6 +17,18 @@ test('Call dials the first number, without its extension', () => {
   for (const [typed, number] of [['845-555-0100 ext. 12', '8455550100'], ['845-555-0100 x12', '8455550100'], ['845-555-0100, ext 12', '8455550100'],
     ['(845) 555-0100 Ext 4', '8455550100'], ['845-555-0100 or 845-555-0199', '8455550100'], ['+1 (845) 555-0100', '+18455550100'], ['555-0142', '5550142'], ['', '']])
     assert.equal(dial(typed), number, typed);
+});
+test('phone numbers and https links in a page\'s text are marked, and nothing else is', () => {
+  const links = t => splitLinks(t).filter(p => p.href).map(p => [p.text, p.href]);
+  assert.deepEqual(links('Plumber: Acme Plumbing 555-0123'), [['555-0123', 'tel:5550123']]);
+  assert.deepEqual(links('Call 845-555-0100 ext. 12 days, (845) 555.0199 nights'), [['845-555-0100', 'tel:8455550100'], ['(845) 555.0199', 'tel:8455550199']]);
+  assert.deepEqual(links('The manual: https://example.com/valve.pdf.'), [['https://example.com/valve.pdf', 'https://example.com/valve.pdf']]);
+  assert.equal(splitLinks('See https://example.com/a. Then call.').map(p => p.text).join(''), 'See https://example.com/a. Then call.', 'text was lost');
+  for (const t of ['16 × 25 × 1', 'XE50T10', 'SN 123-4567-89', '2026-11-27', 'Model 410 2020', '1234-5678', 'http://example.com', 'Breakers 21 and 23'])
+    assert.deepEqual(links(t), [], t);
+  // nothing in the sample house is a link: its models, sizes, breakers and years stay text
+  for (const d of SAMPLE['placard.site']) for (const v of [d.where, d.summary, d.steps, d.care, d.warn, d.notes, ...(d.facts || []).flat()])
+    assert.deepEqual(links(v), [], v);
 });
 test('steps drop their own numbering', () => {
   assert.deepEqual(lines('1. Turn it\n2) Wait\n- Call\n\n'), ['Turn it', 'Wait', 'Call']);

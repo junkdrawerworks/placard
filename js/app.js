@@ -5,7 +5,7 @@ import { Ledger, watchConnectLinks, publicRead, publicReport, refusal, importSum
 import { tagUrl } from './kit/tags.js';
 import { nfcPanel } from './kit/panel.js';
 import { LEDGER_URL } from './config.js';
-import { KINDS, STARTER, SAMPLE, parseFacts, factsText, lines, mergeImport, dial } from './starter.js';
+import { KINDS, STARTER, SAMPLE, parseFacts, factsText, lines, mergeImport, dial, splitLinks } from './starter.js';
 
 const params = new URLSearchParams(location.search);
 const demo = params.has('demo');
@@ -101,24 +101,33 @@ function renderHome() {
       return in_.length ? h('section', {}, h('h2', {}, label), h('ul', { class: 'list' }, in_.map(s =>
         h('li', {}, h('a', { class: 'row', href: '#' + s.id }, h('span', { class: 'main' }, h('span', { class: 't' }, s.name), s.where ? h('span', { class: 's' }, s.where) : null), h('span', { class: 'meta' }, '›')))))) : null;
     }),
-    hs.notes ? h('section', { class: 'card' }, h('h2', {}, 'Good to know'), lines(hs.notes).map(l => h('p', {}, l))) : null,
+    hs.notes ? h('section', { class: 'card' }, h('h2', {}, 'Good to know'), lines(hs.notes).map(l => h('p', {}, linked(l)))) : null,
     !list.length ? h('p', { class: 'empty' }, owner() ? ledger.notReady('site') || 'No systems yet. Add them under Edit.' : 'This house manual is empty for now.') : null,
   ];
 }
 
+// A link or a phone number in a page's text, tappable (text nodes and links only, never HTML).
+const linked = t => splitLinks(t).map(p => !p.href ? p.text : p.href.startsWith('tel:') ? h('a', { href: p.href }, p.text)
+  : h('a', { href: p.href, target: '_blank', rel: 'noopener' }, p.text));
+
 function renderSystem(s) {
   const hs = house();
   const steps = lines(s.steps);
+  // a detail with no value yet: the owner sees it, to fill in; a tenant doesn't
+  const facts = s.facts.filter(([, v]) => v.trim() || owner());
   return [
     h('p', { class: 'crumb' }, h('a', { href: '#' }, '‹ ' + (hs.title || 'House manual'))),
     h('div', { class: 'tape-wrap' }, h('span', { class: 'tape-cap' }, KINDS.find(k => k[0] === group(s))[1]), h('div', { class: 'tape' }, s.name)),
     s.where ? h('p', { class: 'where' }, h('b', {}, 'Where: '), s.where) : null,
     s.summary ? h('p', { class: 'lead' }, s.summary) : null,
     s.warn ? h('div', { class: 'notice warn' }, h('p', {}, s.warn)) : null,
-    steps.length ? h('section', {}, h('h2', {}, 'What to do'), h('ol', { class: 'steps' }, steps.map(l => h('li', {}, l)))) : null,
-    s.facts?.length ? h('section', { class: 'card' }, h('h2', {}, 'Details'), h('dl', { class: 'facts' }, s.facts.map(([k, v]) => [h('dt', {}, k || '·'), h('dd', {}, v)]))) : null,
-    s.care ? h('section', {}, h('h2', {}, 'Looking after it'), lines(s.care).map(l => h('p', {}, l))) : null,
+    steps.length ? h('section', {}, h('h2', {}, 'What to do'), h('ol', { class: 'steps' }, steps.map(l => h('li', {}, linked(l))))) : null,
+    facts.length ? h('section', { class: 'card' }, h('h2', {}, 'Details'), h('dl', { class: 'facts' }, facts.map(([k, v]) =>
+      !k ? h('dd', { class: 'whole' }, linked(v)) : [h('dt', {}, k), v ? h('dd', {}, linked(v)) : h('dd', { class: 'blank' }, 'to fill in')]))) : null,
+    s.care ? h('section', {}, h('h2', {}, 'Looking after it'), lines(s.care).map(l => h('p', {}, linked(l)))) : null,
     s.manual ? h('p', {}, h('a', { class: 'btn ghost', href: s.manual, target: '_blank', rel: 'noopener' }, 'The manual')) : null,
+    // the starter's pages are blank until the owner walks the house: say so rather than show an empty page
+    !(s.where || s.summary || s.warn || steps.length || facts.length || s.care || s.manual) ? h('p', { class: 'empty' }, 'Nothing written here yet. Call or report below.') : null,
     contactCard(hs.contact),
     reportButton(s, 'Report a problem or log a visit'),
     owner() ? ownerTools(s) : null,
@@ -343,7 +352,8 @@ function renderOwner() {
     wait ? h('p', { class: 'empty' }, wait) : null,
     h('ul', { class: 'list' }, list.map(s => h('li', {}, h('a', { class: 'row', href: '#' + s.id },
       h('span', { class: 'main' }, h('span', { class: 't' }, s.name), h('span', { class: 's' }, s.where || 'No location yet')),
-      h('span', { class: 'chip ' + (s.locked ? 'ok' : s.tagged ? 'warn' : '') }, s.locked ? 'locked' : s.tagged ? 'written' : 'no tag'))))),
+      h('span', { class: 'chips' }, s.facts.some(([, v]) => !v.trim()) ? h('span', { class: 'chip warn' }, 'blank details') : null,
+        h('span', { class: 'chip ' + (s.locked ? 'ok' : s.tagged ? 'warn' : '') }, s.locked ? 'locked' : s.tagged ? 'written' : 'no tag')))))),
     wait ? null : frontTag(),
   ];
 }

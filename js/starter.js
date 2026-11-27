@@ -42,6 +42,25 @@ export const factsText = facts => (facts || []).map(([k, v]) => (k ? `${k}: ${v}
 export const dial = phone => String(phone || '').split(/\s*(?:\bext\b\.?|\bx\s*\d|,|;|\bor\b)/i)[0].replace(/[^\d+]/g, '');
 export { lines };   // the kit's: one entry per line, typed numbering and bullets taken off
 
+// Text with its links and phone numbers marked, for a page to make them tappable: [{ text }, { text, href }, …].
+// A phone number is 3-3-4 digits (dashes, dots or spaces between, the area code may be in brackets) or 3-4 with a dash
+// or a dot ("555-0142"), on its own: never part of a longer run of digits or letters, so a model number, a serial, a
+// filter size ("16 × 25 × 1") or a year stays text. Only https links, without the full stop or bracket after them.
+const LINK = /https:\/\/[^\s<>"]+|(?<![\w+.\-/])(?:\+?1[ .-])?(?:(?:\(\d{3}\) ?|\d{3}[ .-])\d{3}[ .-]|\d{3}[.-])\d{4}(?![\w-]|[.,]\d)/g;
+export function splitLinks(text) {
+  const out = [], s = String(text ?? '');
+  let at = 0;
+  for (const m of s.matchAll(LINK)) {
+    let t = m[0];
+    if (t.startsWith('https')) t = t.replace(/[.,;:!?)\]'"]+$/, '');
+    if (m.index > at) out.push({ text: s.slice(at, m.index) });
+    out.push({ text: t, href: t.startsWith('https') ? t : 'tel:' + dial(t) });
+    at = m.index + t.length;
+  }
+  if (at < s.length) out.push({ text: s.slice(at) });
+  return out;
+}
+
 export const SAMPLE = {
   'placard.site': [
     { id: 'house', title: 'House manual', intro: 'Tap any sticker in the house for what that thing is and what to do about it. In an emergency, start here.',

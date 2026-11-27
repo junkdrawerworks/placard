@@ -265,6 +265,10 @@ export async function oddRecordChecks({ browser, base, assert }) {
     const { ctx, L, errors, page } = await phone(browser, base, { published: who === 'tenant' });
     L.site.push(...structuredClone(ODD));
     L.site[0].contact.phone = '845-555-0100 ext. 12';   // an extension: Call dials the number, and shows all of it
+    // a page half filled in (a detail still blank, a line with no label, a service number) and one with only its name
+    Object.assign(L.site.find(d => d.id === 'air-handler-up'), { care: 'Filters from https://example.com/filters.', facts: [['Filter', ''], ['Changed', 'Every 3 months'],
+      ['', 'Spare filters are on the shelf beside it'], ['Service', 'Acme Heating 555-0123']] });
+    L.site.push({ id: 'trash', name: 'Trash and recycling', kind: 'other', order: 30 });
     if (who === 'owner') await ctx.addInitScript(u => localStorage.setItem('placard.ledger', JSON.stringify({ url: u, key: 'k'.repeat(40) })), LEDGER);
     const rows = () => page.locator('.list .row .t').allTextContents();
     try {
@@ -279,12 +283,35 @@ export async function oddRecordChecks({ browser, base, assert }) {
         assert.equal(await page.locator('dialog[open] a.call-now').getAttribute('href'), 'tel:8455550100');
         await page.click('dialog[open] >> text=Cancel');
         const other = await page.locator('section', { has: page.locator('h2', { hasText: 'Everything else' }) }).locator('.row .t').allTextContents();
-        assert.deepEqual(other.sort(), ['Attic', 'Boiler', 'Crawl space', 'Shed'], 'a page in a group Placard doesn\'t know isn\'t listed');
+        assert.deepEqual(other.sort(), ['Attic', 'Boiler', 'Crawl space', 'Shed', 'Trash and recycling'], 'a page in a group Placard doesn\'t know isn\'t listed');
         await page.goto(base + '#attic');
         await page.waitForSelector('.tape >> text=Attic');
         await page.goto(base + '#shed');
         await page.waitForSelector('.tape >> text=Shed');
+        // a blank detail isn't shown to a tenant, a line with no label takes the whole row, and numbers and links tap
+        await page.goto(base + '#air-handler-up');
+        await page.waitForSelector('.facts');
+        assert.deepEqual(await page.locator('.facts dt').allTextContents(), ['Changed', 'Service'], 'a blank detail, or a "·" label, on the tenant\'s page');
+        assert.equal(await page.locator('.facts dd.whole').textContent(), 'Spare filters are on the shelf beside it');
+        assert.deepEqual(await page.locator('#app a[href^="tel:"]').evaluateAll(as => as.map(a => [a.textContent, a.getAttribute('href')])).then(l => l[0]), ['555-0123', 'tel:5550123'], 'the service number isn\'t a link');
+        assert.equal(await page.locator('#app a[href="https://example.com/filters"]').textContent(), 'https://example.com/filters');
+        await page.goto(base + '#trash');
+        await page.waitForSelector('.tape >> text=Trash and recycling');
+        assert.equal(await page.locator('#app .empty').textContent(), 'Nothing written here yet. Call or report below.');
+        // the sample's numbers that aren't phone numbers stay text: a model, a year, breakers, a valve, a filter size
+        for (const id of ['water-heater', 'water-shutoff', 'panel-main']) {
+          await page.goto(base + '#' + id);
+          await page.waitForSelector('.facts');
+          assert.equal(await page.locator('main a[href^="tel:"]:not(.btn)').count(), 0, `a number on ${id} became a phone link`);
+        }
       } else {
+        // the owner sees which pages still have blank details, and the blank lines themselves, to fill in
+        assert.equal(await page.locator('.row', { hasText: 'Air handler, upstairs' }).locator('.chip', { hasText: 'blank details' }).count(), 1, 'no "blank details" in the owner list');
+        assert.equal(await page.locator('.row', { hasText: 'Water heater' }).locator('.chip', { hasText: 'blank details' }).count(), 0);
+        await page.goto(base + '#air-handler-up');
+        await page.waitForSelector('.facts');
+        assert.deepEqual(await page.locator('.facts dt').allTextContents(), ['Filter', 'Changed', 'Service']);
+        assert.equal(await page.locator('.facts dd.blank').textContent(), 'to fill in');
         await page.goto(base + '#boiler');
         await page.click('text=Edit this page');
         assert.equal(await page.locator('#f-kind').evaluate(s => s.value), 'heating', 'Edit shows another group for the page');

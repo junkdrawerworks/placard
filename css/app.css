@@ -12,6 +12,9 @@ ol.steps li::before { content: counter(st); position: absolute; left: 12px; top:
 .urgent-tile b { font: 700 20px/1.1 var(--display); text-transform: uppercase; }
 .urgent-tile span { font-size: 14px; color: var(--ink2); }
 .contact .who { font-weight: 600; margin: 0 0 4px; }
+.facts .whole { grid-column: 1 / -1; font-weight: 400; } /* a detail line with no label */
+.facts .blank { font-weight: 400; font-style: italic; color: var(--ink3); } /* the owner's "to fill in" */
+.chips { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .owner { border-style: dashed; margin-top: 22px; }
 #edit-link { font-size: 15px; }
 .report p { margin: 0 0 6px; }
