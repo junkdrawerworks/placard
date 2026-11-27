@@ -27,8 +27,8 @@ async function load() {
   if (owner()) {
     site = ledger.docs('site');
     render();
-    await ledger.sync(['site', 'reports']);
-    site = ledger.docs('site');
+    ledger.keepUp(['site', 'reports'], () => { site = ledger.docs('site'); render(); });
+    return;
   } else {
     site = jget('placard.public') || [];
     if (site.length) render();
@@ -70,7 +70,7 @@ function renderHome() {
         h('li', {}, h('a', { class: 'row', href: '#' + s.id }, h('span', { class: 'main' }, h('span', { class: 't' }, s.name), s.where ? h('span', { class: 's' }, s.where) : null), h('span', { class: 'meta' }, '›')))))) : null;
     }),
     hs.notes ? h('section', { class: 'card' }, h('h2', {}, 'Good to know'), lines(hs.notes).map(l => h('p', {}, l))) : null,
-    !list.length ? h('p', { class: 'empty' }, owner() ? 'No systems yet. Add them under Edit.' : 'This house manual is empty for now.') : null,
+    !list.length ? h('p', { class: 'empty' }, owner() ? ledger.notReady('site') || 'No systems yet. Add them under Edit.' : 'This house manual is empty for now.') : null,
   ];
 }
 
@@ -252,7 +252,7 @@ function render() {
   else if (r.view === 'owner' && owner()) body = renderOwner();
   else if (r.view === 'print' && owner()) body = renderPrint();
   else if (r.view === 'reports' && owner()) body = renderReports();
-  else if (r.view === 'item') { const s = sys(r.id); body = s ? renderSystem(s) : [h('p', { class: 'crumb' }, h('a', { href: '#' }, '‹ House manual')), h('p', { class: 'empty' }, site.length ? 'This sticker\'s page isn\'t in the manual yet.' : 'Loading…'), owner() ? h('div', { class: 'btns' }, h('button', { class: 'btn', type: 'button', onclick: () => editSystem({ id: r.id, name: '' }) }, 'Make this page')) : null]; }
+  else if (r.view === 'item') { const s = sys(r.id), wait = owner() ? ledger.notReady('site') : site.length ? '' : 'Loading…'; body = s ? renderSystem(s) : [h('p', { class: 'crumb' }, h('a', { href: '#' }, '‹ House manual')), h('p', { class: 'empty' }, wait || 'This sticker\'s page isn\'t in the manual yet.'), owner() && !wait ? h('div', { class: 'btns' }, h('button', { class: 'btn', type: 'button', onclick: () => editSystem({ id: r.id, name: '' }) }, 'Make this page')) : null]; }
   else body = renderHome();
   mount(app, body);
   $('#edit-link').hidden = !owner();
