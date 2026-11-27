@@ -253,6 +253,31 @@ export async function appChecks({ page, ctx, base, assert }) {
   await page.click('dialog >> button[type=submit]');
   await page.waitForSelector('.toast.show >> text=Too long to save');
   assert.equal(await page.evaluate(() => (window.__placard.ledger.doc('site', 'water-heater').care || '').length < 46000), true);
+  // a page that doesn't fit is deleted, then an updated import file comes (blank Where lines and contact, new details):
+  // it fills in, never blanks or replaces what's here, and the deleted page stays deleted; twice over, nothing changes
+  await page.evaluate(() => { location.hash = '#smoke-co'; });
+  await page.click('text=Edit this page');
+  await page.click('dialog[open] >> text=Delete');
+  await page.click('dialog[open] button[type=submit]');
+  await page.waitForSelector('h2 >> text=Edit the manual');
+  const file = { docs: [{ id: 'house', title: 'House manual', intro: '', contact: { name: '', phone: '', email: '', note: '' }, notes: '' },
+    { id: 'water-heater', name: 'Water heater', kind: 'water', order: 2, where: '', facts: [['Model', 'XE50T10'], ['Installed', '2019'], ['Anode', 'Checked 2025']] },
+    { id: 'smoke-co', name: 'Smoke and CO alarms', kind: 'safety', emergency: true, where: '' }, { id: 'garage-door', name: 'Garage door opener', kind: 'other', order: 9 },
+    { id: 'Back Door', name: 'Back door' }] };
+  for (const said of ['Added 1 page, filled in 1, kept your edits; left out 1 you deleted; skipped 1 (id "Back Door").',
+    'Nothing new in the file; your edits stay; left out 1 you deleted; skipped 1 (id "Back Door").']) {
+    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('text=Import')]);
+    await chooser.setFiles({ name: 'placard.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(file)) });
+    await page.waitForSelector(`.toast.show >> text=${said}`);
+  }
+  const doc = id => page.evaluate(id => window.__placard.ledger.doc('site', id), id);
+  assert.equal((await doc('house')).contact.phone, '555-0142', 'the contact card was emptied');
+  const wh = await doc('water-heater');
+  assert.equal(wh.where, 'Basement, under the stairs.', 'the Where line was blanked');
+  assert.deepEqual(wh.facts, [['Make', 'Rheem'], ['Model', 'XE50T10'], ['Installed', '2020'], ['Breakers', '21 and 23'], ['Anode', 'Checked 2025']]);
+  assert.equal(await doc('smoke-co'), null, 'a deleted page came back');
+  assert.equal((await doc('garage-door')).name, 'Garage door opener');
+  assert.equal(await page.locator('.list .row', { hasText: 'Smoke and CO alarms' }).count(), 0);
   // the owner list shows it written and locked, the QR sheet has every page, the report is there to handle
   await page.goto(base + '?demo#/owner');
   await page.waitForSelector('.row');

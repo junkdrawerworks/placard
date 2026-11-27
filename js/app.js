@@ -1,11 +1,11 @@
 // Placard: a house manual on stickers. Tenants tap a sticker and get that system's page with no app and no sign-in;
 // the owner, connected to the ledger, edits the pages, writes and locks the stickers and reads the reports.
 import { $, h, mount, toast, sheet, confirmSheet, route, go, stampText, qrSvg, today, held } from './kit/ui.js';
-import { Ledger, watchConnectLinks, publicRead, publicReport, refusal, importText, STILL_LOADING } from './kit/ledger.js';
+import { Ledger, watchConnectLinks, publicRead, publicReport, refusal, importSummary, STILL_LOADING } from './kit/ledger.js';
 import { tagUrl } from './kit/tags.js';
 import { nfcPanel } from './kit/panel.js';
 import { LEDGER_URL } from './config.js';
-import { KINDS, STARTER, SAMPLE, parseFacts, factsText, lines } from './starter.js';
+import { KINDS, STARTER, SAMPLE, parseFacts, factsText, lines, mergeImport } from './starter.js';
 
 const params = new URLSearchParams(location.search);
 const demo = params.has('demo');
@@ -279,24 +279,24 @@ async function addFromStarter() {
   go('#' + v.pick);
 }
 
+// An import file ({ docs: [...] }, or a list of pages) only fills in (mergeImport): a new page is added, one here gets
+// what's blank in it and details it doesn't have, and a Where line, contact or detail typed here is never blanked or
+// replaced. A page deleted here stays deleted; one in the wrong shape is skipped and named.
 function importFacts() {
   const input = h('input', { type: 'file', accept: '.json,application/json' });
   input.addEventListener('change', async () => {
     if (!ledger.synced('site')) { toast(STILL_LOADING, 'bad'); return; }
-    await ledger.catchUp(['site']); site = ledger.docs('site');
+    await ledger.catchUp(['site']);
+    let merged;
     try {
       const data = JSON.parse(await input.files[0].text());
-      const docs = Array.isArray(data) ? data : data.docs || [];
-      let n = 0;
-      const skipped = {};
-      for (const d of docs) {
-        if (!d) continue;
-        const rec = { ...(site.find(x => x.id === d.id) || {}), ...d }, why = refusal(rec);
-        if (why) { skipped[why] = (skipped[why] || 0) + 1; continue; }
-        ledger.put('site', rec); n++;
-      }
-      site = ledger.docs('site'); render(); toast(importText(n, skipped, 'pages'), Object.keys(skipped).length ? 'bad' : '');
-    } catch (e) { toast('That file isn\'t a Placard import.', 'bad'); }
+      const docs = Array.isArray(data) ? data : data?.docs;
+      if (!Array.isArray(docs)) throw new Error('no pages');
+      merged = mergeImport(docs, id => ledger.doc('site', id), id => ledger.gone('site', id));
+    } catch { toast('That file isn\'t a Placard import.', 'bad'); return; }
+    for (const doc of merged.puts) ledger.put('site', doc);
+    site = ledger.docs('site'); render();
+    toast(importSummary(merged.res, ['page', 'pages']), merged.res.skipped.length ? 'bad' : '');
   });
   input.click();
 }
