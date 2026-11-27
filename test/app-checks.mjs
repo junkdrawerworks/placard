@@ -129,6 +129,7 @@ export async function tenantChecks({ browser, base, assert }) {
 export async function ownerChecks({ browser, base, assert }) {
   const { ctx, L, errors, page } = await phone(browser, base, { published: false });
   await ctx.addInitScript(u => localStorage.setItem('placard.ledger', JSON.stringify({ url: u, key: 'k'.repeat(40) })), LEDGER);
+  await ctx.addInitScript(fakeNfc);
   const text = sel => page.locator(sel).evaluate(el => el.textContent.replace(/\s+/g, ' ').trim());
   try {
     await page.goto(base + '#/owner');
@@ -153,6 +154,34 @@ export async function ownerChecks({ browser, base, assert }) {
     await page.evaluate(() => dispatchEvent(new Event('online')));
     await page.waitForFunction(() => /^(Saved|Up to date)$/.test(document.querySelector('.sync')?.textContent));
     assert.equal(L.puts.at(-1).where, 'Basement, left of the stairs.');
+    // write and lock the sticker; the page saves and draws again, and the next step stays on screen under the state
+    await page.click('text=Write sticker');
+    await page.waitForFunction(() => window.__nfc.writes.length === 1);
+    assert.deepEqual(await page.evaluate(() => window.__nfc.writes), ['https://tag.junkdrawer.works/h/water-heater']);
+    const said = () => page.locator('.nfc > .msg:last-child').textContent();
+    const state = () => page.locator('.nfc .state').textContent();
+    await page.waitForFunction(() => /not locked yet\.$/.test(document.querySelector('.nfc .state')?.textContent));
+    assert.equal(await said(), 'Written. Tap it with the phone to check, then lock it.');
+    assert.equal(await page.locator('.nfc .msg.sample').count(), 0, 'the sample\'s lines on the owner\'s own manual');
+    await page.click('text=Lock sticker');
+    await page.click('dialog >> text=Lock it');
+    await page.waitForFunction(() => window.__nfc.locks === 1);
+    // locked: no Write or Lock to press by mistake, and where a change of address is made instead
+    await page.waitForFunction(() => /^Locked /.test(document.querySelector('.nfc .state')?.textContent));
+    assert.match(await state(), /^Locked [A-Z][a-z]{2} \d{1,2}, \d{4}\. To send it somewhere else, use Switchboard\.$/);
+    assert.equal(await page.locator('.nfc button', { hasText: /Write sticker|Lock sticker/ }).count(), 0, 'Write and Lock offered for a locked sticker');
+    assert.equal(await said(), 'Locked. It will open this page for good.');
+    await page.waitForFunction(() => /^(Saved|Up to date)$/.test(document.querySelector('.sync')?.textContent));
+    assert.ok(L.puts.at(-1).locked, 'the lock was not saved');
+    // a replacement (or a spare) for a locked sticker: a new one for the same page, written and not locked until it is
+    await page.click('.nfc >> text=Replace or make a spare');
+    await page.waitForSelector('.nfc >> text=Use a new blank sticker. The old one, wherever it is, keeps opening this page.');
+    await page.click('.nfc >> text=Write sticker');
+    await page.waitForFunction(() => window.__nfc.writes.length === 2);
+    await page.waitForFunction(() => /not locked yet\.$/.test(document.querySelector('.nfc .state')?.textContent));
+    assert.equal(await page.evaluate(() => window.__placard.ledger.doc('site', 'water-heater').locked), null);
+    assert.equal(await said(), 'Written. Tap it with the phone to check, then lock it.');
+    assert.equal(await page.locator('.nfc button', { hasText: 'Lock sticker' }).count(), 1);
     assert.deepEqual(errors, [], 'errors on the owner pages');
   } finally { await ctx.close(); }
 }
@@ -217,32 +246,21 @@ export async function appChecks({ page, ctx, base, assert }) {
   await page.fill('#f-text', 'The tank is making a ticking noise.');
   await page.click('dialog button[type=submit]');
   await page.waitForSelector('.toast.show >> text=Sent');
-  // owner: write and lock the sticker, then edit the page
+  // owner, in the sample: Write writes a real sticker (and says so), but Lock is off, since it can't be undone
   await page.click('text=Write sticker');
   await page.waitForFunction(() => window.__nfc.writes.length === 1);
   assert.deepEqual(await page.evaluate(() => window.__nfc.writes), ['https://tag.junkdrawer.works/h/water-heater']);
-  // the page saves and draws again: the next step stays on screen, under the saved state
-  const said = () => page.locator('.nfc > .msg:last-child').textContent();
-  const state = () => page.locator('.nfc .state').textContent();
   await page.waitForFunction(() => /not locked yet\.$/.test(document.querySelector('.nfc .state')?.textContent));
-  assert.equal(await said(), 'Written. Tap it with the phone to check, then lock it.');
-  await page.click('text=Lock sticker');
-  await page.click('dialog >> text=Lock it');
-  await page.waitForFunction(() => window.__nfc.locks === 1);
-  // locked: no Write or Lock to press by mistake, and where a change of address is made instead
-  await page.waitForFunction(() => /^Locked /.test(document.querySelector('.nfc .state')?.textContent));
-  assert.match(await state(), /^Locked [A-Z][a-z]{2} \d{1,2}, \d{4}\. To send it somewhere else, use Switchboard\.$/);
-  assert.equal(await page.locator('.nfc button', { hasText: /Write sticker|Lock sticker/ }).count(), 0, 'Write and Lock offered for a locked sticker');
-  assert.equal(await said(), 'Locked. It will open this page for good.');
-  // a replacement (or a spare) for a locked sticker: a new one for the same page, written and not locked until it is
-  await page.click('.nfc >> text=Replace or make a spare');
-  await page.waitForSelector('.nfc >> text=Use a new blank sticker. The old one, wherever it is, keeps opening this page.');
-  await page.click('.nfc >> text=Write sticker');
-  await page.waitForFunction(() => window.__nfc.writes.length === 2);
-  await page.waitForFunction(() => /not locked yet\.$/.test(document.querySelector('.nfc .state')?.textContent));
-  assert.equal(await page.evaluate(() => window.__placard.ledger.doc('site', 'water-heater').locked), null);
-  assert.equal(await said(), 'Written. Tap it with the phone to check, then lock it.');
-  assert.equal(await page.locator('.nfc button', { hasText: 'Lock sticker' }).count(), 1);
+  assert.equal(await page.locator('.nfc > .msg:last-child').textContent(), 'Written. Tap it with the phone to check it opens this page.');
+  assert.deepEqual(await page.locator('.nfc .msg.sample').allTextContents(),
+    ['This writes a real sticker with the sample\'s link.', 'Locking is off in the sample: it can\'t be undone.']);
+  const lockBtn = page.locator('.nfc button', { hasText: 'Lock sticker' });
+  assert.equal(await lockBtn.isDisabled(), true, 'Lock sticker offered in the sample');
+  await lockBtn.click({ force: true });
+  await page.waitForTimeout(300);
+  assert.deepEqual([await page.evaluate(() => window.__nfc.locks), await page.locator('dialog[open]').count()], [0, 0], 'the sample locked a real sticker');
+  // the way out of the sample is in its note
+  assert.equal(await page.locator('#demo-note a.sample-out').getAttribute('href'), './');
   await page.click('text=Edit this page');
   await page.fill('#f-where', 'Basement, under the stairs.');
   await page.click('dialog >> button[type=submit]');

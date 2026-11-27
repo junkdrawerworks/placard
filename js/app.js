@@ -1,6 +1,6 @@
 // Placard: a house manual on stickers. Tenants tap a sticker and get that system's page with no app and no sign-in;
 // the owner, connected to the ledger, edits the pages, writes and locks the stickers and reads the reports.
-import { $, h, mount, toast, sheet, confirmSheet, route, go, stampText, qrSvg, today, held } from './kit/ui.js';
+import { $, h, mount, toast, sheet, confirmSheet, route, go, stampText, qrSvg, today, held, sampleLink } from './kit/ui.js';
 import { Ledger, watchConnectLinks, publicRead, publicReport, refusal, importSummary, STILL_LOADING } from './kit/ledger.js';
 import { tagUrl } from './kit/tags.js';
 import { nfcPanel } from './kit/panel.js';
@@ -193,7 +193,7 @@ function ownerTools(s) {
     h('h2', {}, 'Owner'),
     h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn', onclick: () => editSystem(s) }, 'Edit this page')),
     // A new sticker written for a locked page (a replacement or a spare) is written, not locked, until it's locked too.
-    nfcPanel(tagUrl('h', s.id), { lock: true, label: 'Write sticker', tagged: s.tagged, locked: s.locked,
+    nfcPanel(tagUrl('h', s.id), { lock: true, label: 'Write sticker', sample: !!ledger.demo, tagged: s.tagged, locked: s.locked,
       onWritten: () => save({ ...(sys(s.id) || s), tagged: today(), locked: null }), onLocked: () => save({ ...(sys(s.id) || s), locked: today() }) }));
 }
 
@@ -378,7 +378,7 @@ function render() {
   mount(app, owner() ? h('p', { class: 'sync ' + ledger.state }, ledger.statusText()) : null, body);
   $('#edit-link').hidden = !owner();
   document.title = r.view === 'item' && sys(r.id) ? `${sys(r.id).name} · Placard` : 'Placard';
-  if (demo) $('#demo-note').hidden = false;
+  if (demo) { $('#demo-note').hidden = false; if (!$('#demo-note .sample-out')) $('#demo-note p').append(' ', sampleLink()); }
 }
 
 window.addEventListener('hashchange', () => { render(); scrollTo(0, 0); });
