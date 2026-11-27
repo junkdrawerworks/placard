@@ -120,6 +120,13 @@ export async function tenantChecks({ browser, base, assert }) {
     assert.equal(await page.locator('#app .contact a[href^="tel:"]').getAttribute('href'), 'tel:5550142');
     assert.equal(await page.locator('#app button', { hasText: 'Report a problem' }).count(), 1);
     assert.equal(await page.locator('#app a.btn[href="#"]').count(), 1, 'no way to the front page');
+    // the front-door sticker (h/house, or h/home) opens the whole manual, not "isn't in the manual yet"
+    for (const id of ['house', 'home']) {
+      await page.goto(base + '#' + id);
+      await page.waitForSelector('.urgent-tile');
+      assert.equal(await page.locator('.urgent-tile').count(), 3, `#${id} isn't the front page`);
+      assert.equal(await page.locator('text=This sticker\'s page isn\'t in the manual yet.').count(), 0);
+    }
     assert.deepEqual(errors, [], 'errors on the tenant pages');
   } finally { await ctx.close(); }
 }
@@ -182,6 +189,26 @@ export async function ownerChecks({ browser, base, assert }) {
     assert.equal(await page.evaluate(() => window.__placard.ledger.doc('site', 'water-heater').locked), null);
     assert.equal(await said(), 'Written. Tap it with the phone to check, then lock it.');
     assert.equal(await page.locator('.nfc button', { hasText: 'Lock sticker' }).count(), 1);
+    // the front page's own sticker: h/house opens the whole manual, so the owner gets no Make this page there (it
+    // would save a page over the house's title, contact and notes), and writes and locks it from the Edit screen
+    await page.goto(base + '#house');
+    await page.waitForSelector('.urgent-tile');
+    assert.equal(await page.locator('text=Make this page').count(), 0, 'Make this page offered for the front page');
+    await page.goto(base + '#/owner');
+    const front = page.locator('.front-tag');
+    assert.equal(await front.locator('.url').textContent(), 'https://tag.junkdrawer.works/h/house');
+    await front.locator('text=Write sticker').click();
+    await page.waitForFunction(() => window.__nfc.writes.length === 3);
+    await page.waitForFunction(() => /not locked yet\.$/.test(document.querySelector('.front-tag .state')?.textContent));
+    await front.locator('text=Lock sticker').click();
+    await page.click('dialog >> text=Lock it');
+    await page.waitForFunction(() => window.__nfc.locks === 2);
+    await page.waitForFunction(() => /^Locked /.test(document.querySelector('.front-tag .state')?.textContent));
+    const hs = await page.evaluate(() => window.__placard.ledger.doc('site', 'house'));
+    assert.ok(hs.tagged && hs.locked, 'the front page sticker was not saved as written and locked');
+    assert.deepEqual([hs.title, hs.contact?.phone, hs.notes], [SAMPLE['placard.site'][0].title, '555-0142', SAMPLE['placard.site'][0].notes], 'the house page lost its title, contact or notes');
+    await page.waitForFunction(() => /^(Saved|Up to date)$/.test(document.querySelector('.sync')?.textContent));
+    assert.ok(L.puts.at(-1).id === 'house' && L.puts.at(-1).locked, 'the lock never reached the ledger');
     assert.deepEqual(errors, [], 'errors on the owner pages');
   } finally { await ctx.close(); }
 }
@@ -195,7 +222,7 @@ export async function secondOwnerChecks({ browser, base, assert }) {
     L.delay = 3000;
     await page.goto(base + '#/owner');
     await page.waitForSelector('#app .empty >> text=Loading…');
-    const off = () => page.locator('#app .btns button').evaluateAll(bs => bs.map(b => [b.textContent, b.disabled]));
+    const off = () => page.locator('#app > .btns button').evaluateAll(bs => bs.map(b => [b.textContent, b.disabled]));
     assert.deepEqual(await off(), [['House and contact', true], ['Add a system', true], ['Import', true]], 'a new page offered before the ledger answered');
     await page.goto(base + '#attic');
     assert.equal(await page.locator('text=Make this page').count(), 0, 'Make this page offered before the ledger answered');
@@ -303,7 +330,11 @@ export async function appChecks({ page, ctx, base, assert }) {
   assert.equal(await page.locator('.list .row', { hasText: 'Water heater' }).locator('.chip').textContent(), 'written');
   await page.goto(base + '?demo#/print');
   await page.waitForSelector('.qr-card svg');
-  assert.equal(await page.locator('.qr-card').count(), 5);
+  // one card per page, and first the front page's, for inside the front door
+  assert.equal(await page.locator('.qr-card').count(), 5 + 1);
+  assert.equal(await page.locator('.qr-card').first().locator('b').textContent(), 'House manual');
+  assert.equal(await page.locator('.qr-card').first().locator('span').textContent(), 'Tap or scan for the whole manual.');
+  assert.equal(await page.locator('.qr-card .qr').first().getAttribute('data-url'), 'https://tag.junkdrawer.works/h/house');
   await printChecks(page, assert, '.qr-card');
   await page.goto(base + '?demo#/reports');
   await page.click('text=Mark handled');

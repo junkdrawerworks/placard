@@ -20,9 +20,12 @@ let loading = false;    // a tenant's first visit, nothing kept yet, waiting on 
 const jget = k => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; } };
 const jset = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
+// The front page is the house doc. Its own sticker, tag.junkdrawer.works/h/house (or h/home), opens it, so those two
+// ids are never a system's page.
+const FRONT = new Set(['house', 'home']);
 const house = () => site.find(d => d.id === 'house') || { title: 'House manual' };
-const systems = () => site.filter(d => d.id !== 'house').sort((a, b) => (a.order ?? 99) - (b.order ?? 99) || a.name.localeCompare(b.name));
-const sys = id => site.find(d => d.id === id && d.id !== 'house');
+const systems = () => site.filter(d => !FRONT.has(d.id)).sort((a, b) => (a.order ?? 99) - (b.order ?? 99) || a.name.localeCompare(b.name));
+const sys = id => FRONT.has(id) ? null : site.find(d => d.id === id);
 // A new page (or the house page, the first time) waits until this phone has heard from the ledger: before that its
 // copy can't say which pages are there, and a save would replace the page in the sheet. It asks for the latest first.
 const fresh = then => e => held(e.currentTarget, ledger.catchUp(['site'])).then(() => { site = ledger.docs('site'); return then(); });
@@ -237,6 +240,7 @@ async function editSystem(s) {
     return;
   }
   if (!exists && !ledger.synced('site')) { toast(STILL_LOADING, 'bad'); return; }
+  if (s?.id && FRONT.has(s.id)) { toast(`"${s.id}" is the front page's own address: pick another.`, 'bad'); return; }
   const id = s?.id || uniqueId(v.name);
   if (!save({ ...(s || {}), id, name: v.name, where: v.where, kind: v.kind, emergency: v.emergency === 'yes', summary: v.summary, steps: v.steps,
     facts: parseFacts(v.facts), care: v.care, warn: v.warn, manual: v.manual, order: Number(v.order) || 99 })) return;
@@ -246,7 +250,7 @@ async function editSystem(s) {
 function uniqueId(name) {
   const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || 'system';
   let id = base, n = 2;
-  while (site.some(d => d.id === id)) id = `${base}-${n++}`;
+  while (FRONT.has(id) || site.some(d => d.id === id)) id = `${base}-${n++}`;
   return id;
 }
 
@@ -318,17 +322,33 @@ function renderOwner() {
     h('ul', { class: 'list' }, list.map(s => h('li', {}, h('a', { class: 'row', href: '#' + s.id },
       h('span', { class: 'main' }, h('span', { class: 't' }, s.name), h('span', { class: 's' }, s.where || 'No location yet')),
       h('span', { class: 'chip ' + (s.locked ? 'ok' : s.tagged ? 'warn' : '') }, s.locked ? 'locked' : s.tagged ? 'written' : 'no tag'))))),
+    wait ? null : frontTag(),
   ];
 }
 
+// The front page's own sticker (h/house): the whole manual, for inside the front door. Written and locked like a
+// system's, and saved on the house doc.
+function frontTag() {
+  const hs = house(), mark = v => save({ ...house(), id: 'house', ...v });
+  return h('section', { class: 'owner card front-tag' },
+    h('h2', {}, 'Front-door sticker'),
+    h('p', { class: 'muted' }, 'Opens the whole manual. Put it inside the front door; its QR card is the first on the sheet.'),
+    nfcPanel(tagUrl('h', 'house'), { lock: true, label: 'Write sticker', sample: !!ledger.demo, tagged: hs.tagged, locked: hs.locked,
+      onWritten: () => mark({ tagged: today(), locked: null }), onLocked: () => mark({ locked: today() }) }));
+}
+
 function renderPrint() {
+  const title = house().title || 'House manual';
+  const qrCard = (id, name, line, small) => h('div', { class: 'qr-card' },
+    h('div', { class: 'qr', 'data-url': tagUrl('h', id), html: qrSvg(tagUrl('h', id), { size: 110 }) }),
+    h('div', {}, h('b', {}, name), h('span', {}, line), small ? h('small', {}, small) : null));
   return [
     h('div', { class: 'no-print' }, h('p', { class: 'crumb' }, h('a', { href: '#/owner' }, '‹ Edit')), h('h2', {}, 'QR stickers'),
       h('p', { class: 'muted' }, 'A backup beside each NFC sticker, for phones with NFC off. Print on label paper or plain paper, cut, and tape over with clear packing tape.'),
       h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn', onclick: () => print() }, 'Print'))),
-    h('div', { class: 'qr-sheet' }, systems().map(s => h('div', { class: 'qr-card' },
-      h('div', { class: 'qr', html: qrSvg(tagUrl('h', s.id), { size: 110 }) }),
-      h('div', {}, h('b', {}, s.name), h('span', {}, 'Tap a phone on the sticker, or scan, for what to do.'), h('small', {}, (house().title || 'House manual')))))),
+    h('div', { class: 'qr-sheet' },
+      qrCard('house', 'House manual', 'Tap or scan for the whole manual.', title === 'House manual' ? '' : title),
+      systems().map(s => qrCard(s.id, s.name, 'Tap a phone on the sticker, or scan, for what to do.', title))),
   ];
 }
 
@@ -352,7 +372,7 @@ function renderNotFound(id, badId) {
   return [
     h('p', { class: 'crumb' }, h('a', { href: '#' }, '‹ ' + (hs.title || 'House manual'))),
     h('p', { class: 'empty' }, badId ? `"${id}" can't be a page's id: letters, digits and dashes only.` : 'This sticker\'s page isn\'t in the manual yet.'),
-    owner() && !badId ? h('div', { class: 'btns' }, h('button', { class: 'btn', type: 'button', onclick: fresh(() => editSystem({ id, name: '' })) }, 'Make this page')) : null,
+    owner() && !badId && !FRONT.has(id) ? h('div', { class: 'btns' }, h('button', { class: 'btn', type: 'button', onclick: fresh(() => editSystem({ id, name: '' })) }, 'Make this page')) : null,
     contactCard(hs.contact),
     reportButton({ id, name: '' }, 'Report a problem'),   // the report names the sticker, so the owner knows which
     h('div', { class: 'btns stack' }, h('a', { class: 'btn ghost wide', href: '#' }, 'The whole house manual')),
@@ -370,6 +390,7 @@ function render() {
   else if (r.view === 'owner' && owner()) body = renderOwner();
   else if (r.view === 'print' && owner()) body = renderPrint();
   else if (r.view === 'reports' && owner()) body = renderReports();
+  else if (r.view === 'item' && FRONT.has(r.id)) body = renderHome();
   else if (r.view === 'item') {
     const s = sys(r.id), wait = owner() ? ledger.notReady('site') : site.length ? '' : 'Loading…', badId = owner() && refusal({ id: r.id });
     body = s ? renderSystem(s) : wait ? [h('p', { class: 'crumb' }, h('a', { href: '#' }, '‹ House manual')), h('p', { class: 'empty' }, wait)] : renderNotFound(r.id, badId); }
