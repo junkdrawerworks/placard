@@ -191,17 +191,22 @@ const keepDraft = (key, v) => {
   jset(DRAFTS, all);
 };
 // Sends a report from this page (s: the page, or null for the front page); resolves to whether the owner was emailed,
-// or throws if it didn't go. The draft goes once the ledger has it.
-async function sendReport(s, v, website = '') {
+// or throws if it didn't go. The draft goes once the ledger has it. One send per page at a time: a form closed while
+// its report is on the way leaves the line under the button saying Sending…, so the same report can't go twice.
+const sending = {};
+function sendReport(s, v, website = '') {
   const key = s?.id || '';
-  const doc = { kind: v.kind, text: v.text, name: v.name, contact: v.contact, website, system: s?.id || '', systemName: s?.name || '' };
-  const j = demo ? ledger.demo.handle({ op: 'report', app: 'placard', coll: 'reports', doc })
-    : await publicReport(owner() ? ledger.cfg.url : LEDGER_URL, 'placard', 'reports', doc);
-  const emailed = j?.emailed !== false;  // a ledger script before 1.1 doesn't say: it always tried
-  keepDraft(key, null);
-  sent[key] = { at: Date.now(), emailed };
-  try { sessionStorage.setItem('placard.sent', JSON.stringify(sent)); } catch {}
-  return emailed;
+  if (sending[key]) return sending[key];
+  return (sending[key] = (async () => {
+    const doc = { kind: v.kind, text: v.text, name: v.name, contact: v.contact, website, system: s?.id || '', systemName: s?.name || '' };
+    const j = demo ? ledger.demo.handle({ op: 'report', app: 'placard', coll: 'reports', doc })
+      : await publicReport(owner() ? ledger.cfg.url : LEDGER_URL, 'placard', 'reports', doc);
+    const emailed = j?.emailed !== false;  // a ledger script before 1.1 doesn't say: it always tried
+    keepDraft(key, null);
+    sent[key] = { at: Date.now(), emailed };
+    try { sessionStorage.setItem('placard.sent', JSON.stringify(sent)); } catch {}
+    return emailed;
+  })()).finally(() => { delete sending[key]; render(); });
 }
 const sentToast = emailed => toast(emailed ? 'Sent. The owner gets it by email.' : 'Saved for the owner. If it\'s urgent, call.');
 const failLine = err => /too many/.test(err.message) ? 'Too many reports this hour. Your message is kept: please call.' : 'Couldn\'t send it. Your message is kept: try again, or call.';
@@ -220,7 +225,7 @@ function reportButton(s, label) {
   const key = s?.id || '', done = sent[key], kept = draftOf(key);
   const unsent = kept?.text ? h('div', { class: 'unsent' },
     h('p', { class: 'msg wait' }, `Not sent yet: "${excerpt(kept.text)}"${kept.at ? ` (${dayShort(kept.at)})` : ''}.`),
-    h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn', onclick: async e => {
+    h('div', { class: 'btns' }, sending[key] ? h('button', { type: 'button', class: 'btn', disabled: true }, 'Sending…') : h('button', { type: 'button', class: 'btn', onclick: async e => {
       const b = e.currentTarget;
       b.disabled = true; b.textContent = 'Sending…';
       try { const emailed = await sendReport(s, kept); render(); sentToast(emailed); }

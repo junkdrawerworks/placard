@@ -246,6 +246,23 @@ export async function draftChecks({ browser, base, assert }) {
     await page.goto(base + '#');
     await page.waitForSelector('.urgent-tile');
     assert.equal(await page.locator('.unsent').count(), 0);
+    // the form closed while its report is still on the way (Google slow): the line has nothing to press, and the
+    // report goes once
+    await page.goto(base + '#water-heater');
+    await page.waitForSelector('.tape >> text=Water heater');
+    await page.click('text=Report a problem or log a visit');
+    await page.fill('dialog[open] #f-text', 'The relief valve drips into the pan');
+    L.delay = 3000;
+    await page.click('dialog[open] button[type=submit]');
+    await page.waitForTimeout(500);
+    await page.click('dialog[open] >> text=Cancel');
+    await page.waitForSelector('.unsent');
+    assert.deepEqual(await page.locator('.unsent button').evaluateAll(bs => bs.map(b => [b.textContent, b.disabled])), [['Sending…', true]],
+      'Send it now offered while the report was still on its way');
+    await page.waitForSelector('.unsent', { state: 'detached', timeout: 10000 });
+    L.delay = 0;
+    assert.deepEqual(L.reports.map(r => r.text).filter(t => /relief valve/.test(t)), ['The relief valve drips into the pan'], 'the report went twice, or not at all');
+    assert.match(await text('.sent'), /^Sent to the owner at \d{1,2}:\d\d [ap]m\.$/);
     assert.deepEqual(errors, [], 'errors with a kept report');
   } finally { await ctx.close(); }
 }
