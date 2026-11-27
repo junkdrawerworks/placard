@@ -1,7 +1,7 @@
 // Placard: a house manual on stickers. Tenants tap a sticker and get that system's page with no app and no sign-in;
 // the owner, connected to the ledger, edits the pages, writes and locks the stickers and reads the reports.
 import { $, h, mount, toast, sheet, confirmSheet, route, go, dayText, stampText, qrSvg, today } from './kit/ui.js';
-import { Ledger, takeConnectLink, publicRead, publicReport, refusal, importText } from './kit/ledger.js';
+import { Ledger, watchConnectLinks, publicRead, publicReport, refusal, importText } from './kit/ledger.js';
 import { tagUrl } from './kit/tags.js';
 import { nfcPanel } from './kit/panel.js';
 import { LEDGER_URL } from './config.js';
@@ -9,7 +9,7 @@ import { KINDS, STARTER, SAMPLE, parseFacts, factsText, lines } from './starter.
 
 const params = new URLSearchParams(location.search);
 const demo = params.has('demo');
-takeConnectLink('placard');
+watchConnectLinks('placard', toast);
 const ledger = new Ledger('placard', { demo: demo ? SAMPLE : null });
 const owner = () => ledger.connected;
 const app = $('#app');
