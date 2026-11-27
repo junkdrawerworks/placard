@@ -524,7 +524,7 @@ export async function oddRecordChecks({ browser, base, assert }) {
   for (const who of ['tenant', 'owner']) {
     const { ctx, L, errors, page } = await phone(browser, base, { published: who === 'tenant' });
     L.site.push(...structuredClone(ODD));
-    L.site[0].contact.phone = '845-555-0100 ext. 12';   // an extension: Call dials the number, and shows all of it
+    L.site[0].contact.phone = '800-555-0100 ext. 12';   // an extension: Call dials the number, and shows all of it
     // a page half filled in (a detail still blank, a line with no label, a service number) and one with only its name
     Object.assign(L.site.find(d => d.id === 'air-handler-up'), { care: 'Filters from https://example.com/filters.', facts: [['Filter', ''], ['Changed', 'Every 3 months'],
       ['', 'Spare filters are on the shelf beside it'], ['Service', 'Acme Heating 555-0123']] });
@@ -542,9 +542,9 @@ export async function oddRecordChecks({ browser, base, assert }) {
       for (const name of ['Attic', 'Crawl space', 'Boiler', 'Shed', 'Water heater']) assert.ok(all.includes(name), `${who}: "${name}" isn't listed (${all.join(', ')})`);
       if (who === 'tenant') {
         assert.deepEqual(await page.locator('.contact .btns a').evaluateAll(as => as.map(a => [a.textContent, a.getAttribute('href')])),
-          [['Call 845-555-0100 ext. 12', 'tel:8455550100'], ['Text', 'sms:8455550100'], ['Email', 'mailto:help@example.com']], 'the extension was dialled as part of the number');
+          [['Call 800-555-0100 ext. 12', 'tel:8005550100'], ['Text', 'sms:8005550100'], ['Email', 'mailto:help@example.com']], 'the extension was dialled as part of the number');
         await page.click('text=Report a problem');
-        assert.equal(await page.locator('dialog[open] a.call-now').getAttribute('href'), 'tel:8455550100');
+        assert.equal(await page.locator('dialog[open] a.call-now').getAttribute('href'), 'tel:8005550100');
         await page.click('dialog[open] >> text=Cancel');
         const other = await page.locator('section', { has: page.locator('h2', { hasText: 'Everything else' }) }).locator('.row .t').allTextContents();
         assert.deepEqual(other.sort(), ['Attic', 'Boiler', 'Crawl space', 'Shed', 'Trash and recycling'], 'a page in a group Placard doesn\'t know isn\'t listed');

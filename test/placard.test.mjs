@@ -15,8 +15,8 @@ test('a link or a time on a details line of its own stays one value, and survive
   assert.deepEqual(parseFacts(factsText(f)), f, 'a second edit changed the details');
 });
 test('Call dials the first number, without its extension', () => {
-  for (const [typed, number] of [['845-555-0100 ext. 12', '8455550100'], ['845-555-0100 x12', '8455550100'], ['845-555-0100, ext 12', '8455550100'],
-    ['(845) 555-0100 Ext 4', '8455550100'], ['845-555-0100 or 845-555-0199', '8455550100'], ['+1 (845) 555-0100', '+18455550100'], ['555-0142', '5550142'], ['', ''],
+  for (const [typed, number] of [['800-555-0100 ext. 12', '8005550100'], ['800-555-0100 x12', '8005550100'], ['800-555-0100, ext 12', '8005550100'],
+    ['(800) 555-0100 Ext 4', '8005550100'], ['800-555-0100 or 800-555-0199', '8005550100'], ['+1 (800) 555-0100', '+18005550100'], ['555-0142', '5550142'], ['', ''],
     ['800-555-0100 / 800-555-0199', '8005550100'], ['800-555-0100/0199', '8005550100'], ['800-555-0100 & 800-555-0199', '8005550100'],
     ['800-555-0100 and 800-555-0199', '8005550100'], ['800-555-0100 (after 6 pm 800-555-0199)', '8005550100'], ['800-555-0100(nights 800-555-0199)', '8005550100'],
     ['(800)555-0100', '8005550100']])
@@ -25,7 +25,7 @@ test('Call dials the first number, without its extension', () => {
 test('phone numbers and https links in a page\'s text are marked, and nothing else is', () => {
   const links = t => splitLinks(t).filter(p => p.href).map(p => [p.text, p.href]);
   assert.deepEqual(links('Plumber: Acme Plumbing 555-0123'), [['555-0123', 'tel:5550123']]);
-  assert.deepEqual(links('Call 845-555-0100 ext. 12 days, (845) 555.0199 nights'), [['845-555-0100', 'tel:8455550100'], ['(845) 555.0199', 'tel:8455550199']]);
+  assert.deepEqual(links('Call 800-555-0100 ext. 12 days, (800) 555.0199 nights'), [['800-555-0100', 'tel:8005550100'], ['(800) 555.0199', 'tel:8005550199']]);
   assert.deepEqual(links('The manual: https://example.com/valve.pdf.'), [['https://example.com/valve.pdf', 'https://example.com/valve.pdf']]);
   assert.equal(splitLinks('See https://example.com/a. Then call.').map(p => p.text).join(''), 'See https://example.com/a. Then call.', 'text was lost');
   for (const t of ['16 × 25 × 1', 'XE50T10', 'SN 123-4567-89', '2026-11-27', 'Model 410 2020', '1234-5678', 'http://example.com', 'Breakers 21 and 23',

@@ -37,9 +37,9 @@ export function parseFacts(text) {
   });
 }
 export const factsText = facts => (facts || []).map(([k, v]) => (k ? `${k}: ${v}` : v)).join('\n');
-// The number a Call or Text button dials: the first one written, without an extension ("845-555-0100 ext. 12",
+// The number a Call or Text button dials: the first one written, without an extension ("800-555-0100 ext. 12",
 // "… x12", "…, ext 12"), a second number ("… or …", "… / …", "… & …", "… and …") or a note in brackets ("… (after
-// 6 pm …)"); a bracketed area code ("(845) 555-0100") stays. The button still shows all of it.
+// 6 pm …)"); a bracketed area code ("(800) 555-0100") stays. The button still shows all of it.
 export const dial = phone => String(phone || '').split(/\s*(?:\bext\b\.?|\bx\s*\d|,|;|\/|&|\((?!\d{3}\))|\bor\b|\band\b)/i)[0].replace(/[^\d+]/g, '');
 export { lines };   // the kit's: one entry per line, typed numbering and bullets taken off
 
