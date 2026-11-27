@@ -616,6 +616,26 @@ export async function oddRecordChecks({ browser, base, assert }) {
   }
 }
 
+// A phone with the page resized above its on-screen keyboard (390 x 500): the Edit sheet and the report form open with
+// the focus on their title, not a field (so the keyboard waits for a tap), are named by it, and every field, focused
+// in turn, sits above the Save bar.
+async function keyboardChecks({ browser, base, assert }) {
+  const { fieldsUnderBar } = await import('./kit-checks.mjs');
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 500 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, serviceWorkers: 'block' });
+  try {
+    const page = await ctx.newPage();
+    for (const [open, name] of [['text=Edit this page', 'Edit Water heater'], ['text=Report a problem or log a visit', 'Tell the owner']]) {
+      await page.goto('about:blank');
+      await page.goto(base + '?demo#water-heater');
+      await page.click(open);
+      const dlg = page.getByRole('dialog', { name });
+      await dlg.waitFor();
+      assert.equal(await page.evaluate(() => document.activeElement?.tagName), 'H2', `${name}: a field took the focus on a touch screen, so the keyboard covered the sheet`);
+      assert.deepEqual(await fieldsUnderBar(page), [], `${name}: a focused field sits under the Save bar`);
+    }
+  } finally { await ctx.close(); }
+}
+
 export async function appChecks({ page, ctx, base, assert }) {
   await tenantChecks({ browser: ctx.browser(), base, assert });
   await ownerChecks({ browser: ctx.browser(), base, assert });
@@ -624,6 +644,7 @@ export async function appChecks({ page, ctx, base, assert }) {
   await retryChecks({ browser: ctx.browser(), base, assert });
   await configChecks({ browser: ctx.browser(), base, assert });
   await draftChecks({ browser: ctx.browser(), base, assert });
+  await keyboardChecks({ browser: ctx.browser(), base, assert });
   // a tenant on an unpublished manual
   assert.match(await page.locator('#app').innerText(), /Not published yet/);
   // the sample house, as a tenant would see it after tapping a sticker

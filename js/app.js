@@ -255,7 +255,9 @@ function report(s) {
   // ?&body= so the text comes through on an iPhone (which reads &body=) and on Android (which reads the query)
   const smsHref = () => `sms:${tel}?&body=${encodeURIComponent([s?.name, values().text].filter(Boolean).join(': ') + (values().name ? ` (${values().name})` : ''))}`;
   const send = h('button', { type: 'submit', class: 'btn' }, 'Send');
-  const dlg = h('dialog', { class: 'sheet' });
+  // as the kit's sheets: the title names the form, and on a touch screen takes the focus, so the keyboard waits for a tap
+  const head = h('h2', { id: 'report-title' }, 'Tell the owner');
+  const dlg = h('dialog', { class: 'sheet', 'aria-labelledby': 'report-title' });
   const form = h('form', { method: 'dialog' },
     // the whole amber band is the link, a target a thumb can't miss
     tel ? h('a', { class: 'notice warn call-now', href: 'tel:' + tel }, 'Urgent? ', h('b', {}, `Call ${c.phone} now`), '.') : null,
@@ -290,10 +292,11 @@ function report(s) {
   });
   // closed: the page behind says whether something typed there hasn't gone
   dlg.addEventListener('close', () => { setTimeout(() => dlg.remove(), 50); render(); });
-  dlg.append(h('h2', {}, 'Tell the owner'), form);
+  if (matchMedia('(pointer: coarse)').matches) { head.setAttribute('tabindex', '-1'); head.setAttribute('autofocus', ''); }
+  else kind.setAttribute('autofocus', '');
+  dlg.append(head, form);
   document.body.append(dlg);
   dlg.showModal();
-  if (!matchMedia('(pointer: coarse)').matches) kind.focus();
 }
 
 // ---------------------------------------------------------------- owner
