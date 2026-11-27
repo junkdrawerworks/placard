@@ -387,7 +387,7 @@ async function editSystem(s) {
   ] });
   if (!v) return;
   if (v.__danger) {
-    if (await confirmSheet('Delete ' + s.name + '?', 'Its page goes. A sticker written for it will open a page saying it isn\'t in the manual yet, with Who to call and the whole manual.', 'Delete')) {
+    if (await confirmSheet('Delete ' + s.name + '?', 'Its page goes. A sticker written for it will open a page saying it isn\'t in the manual yet, with Who to call and the whole manual.', 'Delete', { danger: true })) {
       ledger.del('site', s.id); fromLedger(); go('#/owner');
     }
     return;
