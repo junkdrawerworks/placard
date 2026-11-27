@@ -29,9 +29,10 @@ const house = () => site.find(d => d.id === 'house') || { title: 'House manual' 
 const systems = () => site.filter(d => !FRONT.has(d.id)).sort((a, b) => a.order - b.order || String(a.name).localeCompare(String(b.name)));
 const sys = id => FRONT.has(id) ? null : site.find(d => d.id === id);
 // The pages as the screens use them. A record typed into the sheet by hand, or from an old import, can lack a name or an
-// order, have details that aren't a list, or a group that isn't one of the six: each page still draws and is listed
-// (a page without a name goes by its id, 'crawl-space' as 'Crawl space'; an unknown group under Everything else, and
-// kept as it is when the page is saved). A row whose JSON didn't read never reaches the screens.
+// order, have details typed as text instead of a list, or a group that isn't one of the six: each page still draws
+// and is listed (a page without a name goes by its id, 'crawl-space' as 'Crawl space'; details typed as text read as
+// "Label: value" lines, as an import reads them; an unknown group under Everything else, and kept as it is when the
+// page is saved). A row whose JSON didn't read never reaches the screens.
 const str = v => (v == null ? '' : typeof v === 'string' ? v : String(v));
 const group = s => (KINDS.some(([k]) => k === s.kind) ? s.kind : 'other');
 function normal(d) {
@@ -41,7 +42,7 @@ function normal(d) {
   }
   const named = typeof d.name === 'string' && d.name.trim() ? d.name : '';
   return { ...d, name: named || (d.id.charAt(0).toUpperCase() + d.id.slice(1)).replace(/-/g, ' '),
-    facts: Array.isArray(d.facts) ? d.facts.filter(Array.isArray).map(([k, v]) => [str(k), str(v)]) : [],
+    facts: Array.isArray(d.facts) ? d.facts.filter(Array.isArray).map(([k, v]) => [str(k), str(v)]) : typeof d.facts === 'string' ? parseFacts(d.facts) : [],
     order: Number.isFinite(Number(d.order)) && d.order !== '' && d.order != null ? Number(d.order) : 99 };
 }
 const pages = docs => (Array.isArray(docs) ? docs : []).filter(d => d && typeof d === 'object' && typeof d.id === 'string' && d.id && !d._bad && !d._deleted).map(normal);

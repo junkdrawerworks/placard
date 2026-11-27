@@ -530,7 +530,11 @@ export async function oddRecordChecks({ browser, base, assert }) {
       ['', 'Spare filters are on the shelf beside it'], ['Service', 'Acme Heating 555-0123']] });
     L.site.push({ id: 'trash', name: 'Trash and recycling', kind: 'other', order: 30 });
     if (who === 'owner') await ctx.addInitScript(u => localStorage.setItem('placard.ledger', JSON.stringify({ url: u, key: 'k'.repeat(40) })), LEDGER);
+    if (who === 'owner') await ctx.addInitScript(fakeNfc);
     const rows = () => page.locator('.list .row .t').allTextContents();
+    // the shed's details were typed into the sheet as text, not a list: they read as Label: value lines
+    const shedFacts = async () => { await page.goto(base + '#shed'); await page.waitForSelector('.tape >> text=Shed');
+      return [await page.locator('.facts dt').allTextContents(), await page.locator('.facts dd').allTextContents()]; };
     try {
       await page.goto(base + (who === 'owner' ? '#/owner' : ''));
       await page.waitForSelector('.list .row', { timeout: 8000 });
@@ -546,8 +550,7 @@ export async function oddRecordChecks({ browser, base, assert }) {
         assert.deepEqual(other.sort(), ['Attic', 'Boiler', 'Crawl space', 'Shed', 'Trash and recycling'], 'a page in a group Placard doesn\'t know isn\'t listed');
         await page.goto(base + '#attic');
         await page.waitForSelector('.tape >> text=Attic');
-        await page.goto(base + '#shed');
-        await page.waitForSelector('.tape >> text=Shed');
+        assert.deepEqual(await shedFacts(), [['Lock'], ['blue']], 'details typed into the sheet as text were dropped');
         // a blank detail isn't shown to a tenant, a line with no label takes the whole row, and numbers and links tap
         await page.goto(base + '#air-handler-up');
         await page.waitForSelector('.facts');
@@ -580,6 +583,12 @@ export async function oddRecordChecks({ browser, base, assert }) {
         await page.waitForSelector('.where >> text=back corner');
         await page.waitForFunction(() => /^(Saved|Up to date)$/.test(document.querySelector('.sync')?.textContent));
         assert.deepEqual([L.puts.at(-1).id, L.puts.at(-1).kind], ['boiler', 'heating'], 'a Where change saved the page in another group');
+        // and writing its sticker, which saves the page, keeps them
+        assert.deepEqual(await shedFacts(), [['Lock'], ['blue']], 'details typed into the sheet as text were dropped (owner)');
+        await page.click('text=Write sticker');
+        await page.waitForFunction(() => window.__nfc.writes.length === 1);
+        await page.waitForFunction(() => /^(Saved|Up to date)$/.test(document.querySelector('.sync')?.textContent));
+        assert.deepEqual([L.puts.at(-1).id, L.puts.at(-1).facts], ['shed', [['Lock', 'blue']]], 'writing the sticker saved the page without its details');
       }
       assert.deepEqual(errors, [], `errors with odd records (${who})`);
     } finally { await ctx.close(); }
