@@ -1,7 +1,7 @@
 // Placard: a house manual on stickers. Tenants tap a sticker and get that system's page with no app and no sign-in;
 // the owner, connected to the ledger, edits the pages, writes and locks the stickers and reads the reports.
-import { $, h, mount, toast, sheet, confirmSheet, route, go, stampText, qrSvg, today } from './kit/ui.js';
-import { Ledger, watchConnectLinks, publicRead, publicReport, refusal, importText } from './kit/ledger.js';
+import { $, h, mount, toast, sheet, confirmSheet, route, go, stampText, qrSvg, today, held } from './kit/ui.js';
+import { Ledger, watchConnectLinks, publicRead, publicReport, refusal, importText, STILL_LOADING } from './kit/ledger.js';
 import { tagUrl } from './kit/tags.js';
 import { nfcPanel } from './kit/panel.js';
 import { LEDGER_URL } from './config.js';
@@ -23,6 +23,9 @@ const jset = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } cat
 const house = () => site.find(d => d.id === 'house') || { title: 'House manual' };
 const systems = () => site.filter(d => d.id !== 'house').sort((a, b) => (a.order ?? 99) - (b.order ?? 99) || a.name.localeCompare(b.name));
 const sys = id => site.find(d => d.id === id && d.id !== 'house');
+// A new page (or the house page, the first time) waits until this phone has heard from the ledger: before that its
+// copy can't say which pages are there, and a save would replace the page in the sheet. It asks for the latest first.
+const fresh = then => e => held(e.currentTarget, ledger.catchUp(['site'])).then(() => { site = ledger.docs('site'); return then(); });
 
 async function load() {
   if (owner()) {
@@ -233,6 +236,7 @@ async function editSystem(s) {
     }
     return;
   }
+  if (!exists && !ledger.synced('site')) { toast(STILL_LOADING, 'bad'); return; }
   const id = s?.id || uniqueId(v.name);
   if (!save({ ...(s || {}), id, name: v.name, where: v.where, kind: v.kind, emergency: v.emergency === 'yes', summary: v.summary, steps: v.steps,
     facts: parseFacts(v.facts), care: v.care, warn: v.warn, manual: v.manual, order: Number(v.order) || 99 })) return;
@@ -258,6 +262,7 @@ async function editHouse() {
     { name: 'notes', label: 'Good to know (one per line)', type: 'textarea', value: hs.notes },
   ] });
   if (!v || v.__danger) return;
+  if (!site.some(d => d.id === 'house') && !ledger.synced('site')) { toast(STILL_LOADING, 'bad'); return; }
   if (save({ ...hs, id: 'house', title: v.title, intro: v.intro, notes: v.notes, contact: { name: v.cname, phone: v.phone, email: v.email, note: v.cnote } })) saidSaved('house');
 }
 
@@ -269,6 +274,7 @@ async function addFromStarter() {
   ] });
   if (!v || !v.pick) return;
   if (v.pick === '__new') return editSystem(null);
+  if (!ledger.synced('site')) { toast(STILL_LOADING, 'bad'); return; }
   save({ ...STARTER.find(s => s.id === v.pick) });
   go('#' + v.pick);
 }
@@ -276,6 +282,8 @@ async function addFromStarter() {
 function importFacts() {
   const input = h('input', { type: 'file', accept: '.json,application/json' });
   input.addEventListener('change', async () => {
+    if (!ledger.synced('site')) { toast(STILL_LOADING, 'bad'); return; }
+    await ledger.catchUp(['site']); site = ledger.docs('site');
     try {
       const data = JSON.parse(await input.files[0].text());
       const docs = Array.isArray(data) ? data : data.docs || [];
@@ -295,17 +303,18 @@ function importFacts() {
 
 function renderOwner() {
   const list = systems();
-  const reports = ledger.docs('reports').filter(r => r.status !== 'handled');
+  const reports = ledger.docs('reports').filter(r => r.status !== 'handled'), wait = ledger.notReady('site');
   return [
     h('p', { class: 'crumb' }, h('a', { href: '#' }, '‹ Tenant view')),
     h('h2', {}, 'Edit the manual'),
     !LEDGER_URL && !demo ? h('div', { class: 'notice warn' }, h('p', {}, h('b', {}, 'Tenants can\'t see this yet. '), 'Put the ledger address in js/config.js in the repo (Part 1 of the guide).')) : null,
     h('div', { class: 'btns' },
-      h('button', { type: 'button', class: 'btn', onclick: editHouse }, 'House and contact'),
-      h('button', { type: 'button', class: 'btn ghost', onclick: addFromStarter }, 'Add a system'),
+      h('button', { type: 'button', class: 'btn', disabled: !!wait, onclick: fresh(editHouse) }, 'House and contact'),
+      h('button', { type: 'button', class: 'btn ghost', disabled: !!wait, onclick: fresh(addFromStarter) }, 'Add a system'),
       h('a', { class: 'btn ghost', href: '#/print' }, 'QR stickers'),
       h('a', { class: 'btn ghost', href: '#/reports' }, `Reports${reports.length ? ' (' + reports.length + ')' : ''}`),
-      h('button', { type: 'button', class: 'btn ghost', onclick: importFacts }, 'Import')),
+      h('button', { type: 'button', class: 'btn ghost', disabled: !!wait, onclick: importFacts }, 'Import')),
+    wait ? h('p', { class: 'empty' }, wait) : null,
     h('ul', { class: 'list' }, list.map(s => h('li', {}, h('a', { class: 'row', href: '#' + s.id },
       h('span', { class: 'main' }, h('span', { class: 't' }, s.name), h('span', { class: 's' }, s.where || 'No location yet')),
       h('span', { class: 'chip ' + (s.locked ? 'ok' : s.tagged ? 'warn' : '') }, s.locked ? 'locked' : s.tagged ? 'written' : 'no tag'))))),
@@ -343,7 +352,7 @@ function renderNotFound(id, badId) {
   return [
     h('p', { class: 'crumb' }, h('a', { href: '#' }, '‹ ' + (hs.title || 'House manual'))),
     h('p', { class: 'empty' }, badId ? `"${id}" can't be a page's id: letters, digits and dashes only.` : 'This sticker\'s page isn\'t in the manual yet.'),
-    owner() && !badId ? h('div', { class: 'btns' }, h('button', { class: 'btn', type: 'button', onclick: () => editSystem({ id, name: '' }) }, 'Make this page')) : null,
+    owner() && !badId ? h('div', { class: 'btns' }, h('button', { class: 'btn', type: 'button', onclick: fresh(() => editSystem({ id, name: '' })) }, 'Make this page')) : null,
     contactCard(hs.contact),
     reportButton({ id, name: '' }, 'Report a problem'),   // the report names the sticker, so the owner knows which
     h('div', { class: 'btns stack' }, h('a', { class: 'btn ghost wide', href: '#' }, 'The whole house manual')),

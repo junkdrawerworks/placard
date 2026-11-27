@@ -157,9 +157,49 @@ export async function ownerChecks({ browser, base, assert }) {
   } finally { await ctx.close(); }
 }
 
+// A second owner device (the laptop), connected while Google takes 3 s to answer its first list: Add a system, House
+// and contact and Import wait for it, and then the usual list leaves out the pages the sheet already has.
+export async function secondOwnerChecks({ browser, base, assert }) {
+  const { ctx, L, errors, page } = await phone(browser, base, { published: false });
+  await ctx.addInitScript(u => { try { localStorage.getItem('placard.ledger') || localStorage.setItem('placard.ledger', JSON.stringify({ url: u, key: 'k'.repeat(40) })); } catch {} }, LEDGER);
+  try {
+    L.delay = 3000;
+    await page.goto(base + '#/owner');
+    await page.waitForSelector('#app .empty >> text=Loading…');
+    const off = () => page.locator('#app .btns button').evaluateAll(bs => bs.map(b => [b.textContent, b.disabled]));
+    assert.deepEqual(await off(), [['House and contact', true], ['Add a system', true], ['Import', true]], 'a new page offered before the ledger answered');
+    await page.goto(base + '#attic');
+    assert.equal(await page.locator('text=Make this page').count(), 0, 'Make this page offered before the ledger answered');
+    await page.goto(base + '#/owner');
+    await page.waitForFunction(() => document.querySelector('.sync')?.textContent === 'Up to date', null, { timeout: 10000 });
+    await page.locator('#app button:enabled', { hasText: 'Add a system' }).waitFor({ timeout: 2000 });
+    assert.deepEqual(await off(), [['House and contact', false], ['Add a system', false], ['Import', false]]);
+    L.delay = 0;
+    await page.click('text=Add a system');
+    const offered = await page.locator('dialog[open] #f-pick option').evaluateAll(os => os.map(o => o.value));
+    assert.ok(!offered.includes('water-shutoff') && offered.includes('well-tank'), 'the usual list offers a page the sheet already has');
+    await page.selectOption('dialog[open] #f-pick', 'well-tank');
+    await page.click('dialog[open] button[type=submit]');
+    await page.waitForSelector('.tape >> text=Well pressure tank');
+    await page.waitForFunction(() => /^(Saved|Up to date)$/.test(document.querySelector('.sync')?.textContent));
+    assert.deepEqual(L.puts.map(d => d.id), ['well-tank'], 'a page already on the sheet was saved over');
+    // a sheet opened, then the copy forgotten before Add: nothing is saved from nothing
+    await page.goto(base + '#/owner');
+    await page.click('text=Add a system');
+    await page.waitForSelector('dialog[open]');
+    await page.evaluate(() => { const m = window.__placard.ledger.m('site'); m.since = 0; m.listed = false; });
+    await page.selectOption('dialog[open] #f-pick', 'septic');
+    await page.click('dialog[open] button[type=submit]');
+    await page.waitForSelector('.toast.show >> text=Still loading from the ledger. Try again in a moment.');
+    assert.deepEqual(L.puts.map(d => d.id), ['well-tank']);
+    assert.deepEqual(errors, [], 'errors on the second owner device');
+  } finally { await ctx.close(); }
+}
+
 export async function appChecks({ page, ctx, base, assert }) {
   await tenantChecks({ browser: ctx.browser(), base, assert });
   await ownerChecks({ browser: ctx.browser(), base, assert });
+  await secondOwnerChecks({ browser: ctx.browser(), base, assert });
   // a tenant on an unpublished manual
   assert.match(await page.locator('#app').innerText(), /Not published yet/);
   // the sample house, as a tenant would see it after tapping a sticker
