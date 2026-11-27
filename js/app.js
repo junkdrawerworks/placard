@@ -1,7 +1,7 @@
 // Placard: a house manual on stickers. Tenants tap a sticker and get that system's page with no app and no sign-in;
 // the owner, connected to the ledger, edits the pages, writes and locks the stickers and reads the reports.
 import { $, h, mount, toast, sheet, confirmSheet, route, go, dayText, stampText, qrSvg, today } from './kit/ui.js';
-import { Ledger, takeConnectLink, publicRead, publicReport } from './kit/ledger.js';
+import { Ledger, takeConnectLink, publicRead, publicReport, refusal, importText } from './kit/ledger.js';
 import { tagUrl } from './kit/tags.js';
 import { nfcPanel } from './kit/panel.js';
 import { LEDGER_URL } from './config.js';
@@ -120,7 +120,16 @@ function ownerTools(s) {
       onWritten: () => save({ ...s, tagged: today() }), onLocked: () => save({ ...s, locked: today() }) }));
 }
 
-function save(doc) { ledger.put('site', doc); site = ledger.docs('site'); render(); }
+// Saves a page; says so and returns false if the ledger couldn't take it (a page over 45,000 characters).
+function save(doc) {
+  try { ledger.put('site', doc); }
+  catch (e) {
+    if (!e.refused) throw e;
+    toast(e.refused === 'too big' ? 'Too long to save: over 45,000 characters. Shorten it, or link the manual instead.' : `"${doc.id}" can't be a page's id: letters, digits and dashes only.`, 'bad');
+    return false;
+  }
+  site = ledger.docs('site'); render(); return true;
+}
 
 async function editSystem(s) {
   const exists = !!(s && sys(s.id));
@@ -145,8 +154,8 @@ async function editSystem(s) {
     return;
   }
   const id = s?.id || uniqueId(v.name);
-  save({ ...(s || {}), id, name: v.name, where: v.where, kind: v.kind, emergency: v.emergency === 'yes', summary: v.summary, steps: v.steps,
-    facts: parseFacts(v.facts), care: v.care, warn: v.warn, manual: v.manual, order: Number(v.order) || 99 });
+  if (!save({ ...(s || {}), id, name: v.name, where: v.where, kind: v.kind, emergency: v.emergency === 'yes', summary: v.summary, steps: v.steps,
+    facts: parseFacts(v.facts), care: v.care, warn: v.warn, manual: v.manual, order: Number(v.order) || 99 })) return;
   toast('Saved. Tenants see it now.');
   if (!exists) go('#' + id);
 }
@@ -191,8 +200,14 @@ function importFacts() {
       const data = JSON.parse(await input.files[0].text());
       const docs = Array.isArray(data) ? data : data.docs || [];
       let n = 0;
-      for (const d of docs) if (d && d.id) { ledger.put('site', { ...(site.find(x => x.id === d.id) || {}), ...d }); n++; }
-      site = ledger.docs('site'); render(); toast(`Imported ${n} pages.`);
+      const skipped = {};
+      for (const d of docs) {
+        if (!d) continue;
+        const rec = { ...(site.find(x => x.id === d.id) || {}), ...d }, why = refusal(rec);
+        if (why) { skipped[why] = (skipped[why] || 0) + 1; continue; }
+        ledger.put('site', rec); n++;
+      }
+      site = ledger.docs('site'); render(); toast(importText(n, skipped, 'pages'), Object.keys(skipped).length ? 'bad' : '');
     } catch (e) { toast('That file isn\'t a Placard import.', 'bad'); }
   });
   input.click();
@@ -252,7 +267,9 @@ function render() {
   else if (r.view === 'owner' && owner()) body = renderOwner();
   else if (r.view === 'print' && owner()) body = renderPrint();
   else if (r.view === 'reports' && owner()) body = renderReports();
-  else if (r.view === 'item') { const s = sys(r.id), wait = owner() ? ledger.notReady('site') : site.length ? '' : 'Loading…'; body = s ? renderSystem(s) : [h('p', { class: 'crumb' }, h('a', { href: '#' }, '‹ House manual')), h('p', { class: 'empty' }, wait || 'This sticker\'s page isn\'t in the manual yet.'), owner() && !wait ? h('div', { class: 'btns' }, h('button', { class: 'btn', type: 'button', onclick: () => editSystem({ id: r.id, name: '' }) }, 'Make this page')) : null]; }
+  else if (r.view === 'item') {
+    const s = sys(r.id), wait = owner() ? ledger.notReady('site') : site.length ? '' : 'Loading…', badId = owner() && refusal({ id: r.id });
+    body = s ? renderSystem(s) : [h('p', { class: 'crumb' }, h('a', { href: '#' }, '‹ House manual')), h('p', { class: 'empty' }, wait || (badId ? `"${r.id}" can't be a page's id: letters, digits and dashes only.` : 'This sticker\'s page isn\'t in the manual yet.')), owner() && !wait && !badId ? h('div', { class: 'btns' }, h('button', { class: 'btn', type: 'button', onclick: () => editSystem({ id: r.id, name: '' }) }, 'Make this page')) : null]; }
   else body = renderHome();
   mount(app, body);
   $('#edit-link').hidden = !owner();

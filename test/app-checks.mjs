@@ -36,6 +36,12 @@ export async function appChecks({ page, base, assert }) {
   await page.fill('#f-where', 'Basement, under the stairs.');
   await page.click('dialog >> button[type=submit]');
   await page.waitForSelector('.where >> text=under the stairs');
+  // a page too long for the ledger (a whole manual pasted in) says so, and the page keeps what it had
+  await page.click('text=Edit this page');
+  await page.fill('#f-care', 'x'.repeat(46000));
+  await page.click('dialog >> button[type=submit]');
+  await page.waitForSelector('.toast.show >> text=Too long to save');
+  assert.equal(await page.evaluate(() => (window.__placard.ledger.doc('site', 'water-heater').care || '').length < 46000), true);
   // the owner list shows it written and locked, the QR sheet has every page, the report is there to handle
   await page.goto(base + '?demo#/owner');
   await page.waitForSelector('.row');
