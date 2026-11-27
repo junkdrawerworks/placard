@@ -71,7 +71,7 @@ export async function tenantChecks({ browser, base, assert }) {
     await page.waitForSelector('dialog[open] .msg.bad');
     assert.equal(await text('dialog[open] .msg.bad'), 'Couldn\'t send it. Your message is kept: try again, or call.');
     assert.equal(await page.inputValue('dialog[open] #f-text'), 'Water on the floor under the tank', 'a failed send threw the text away');
-    assert.equal(await page.locator('dialog[open] a.sms').getAttribute('href'), 'sms:5550142?body=' + encodeURIComponent('Water heater: Water on the floor under the tank (Pat)'));
+    assert.equal(await page.locator('dialog[open] a.sms').getAttribute('href'), 'sms:5550142?&body=' + encodeURIComponent('Water heater: Water on the floor under the tank (Pat)'));
     assert.equal(await page.locator('dialog[open] button[type=submit]').evaluate(b => b.disabled), false, 'Send stays off after a failure');
     // closed, and the page opened again later: the form comes back with what was typed
     await page.click('dialog[open] >> text=Cancel');

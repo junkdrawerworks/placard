@@ -136,7 +136,8 @@ function report(s) {
   const values = () => ({ kind: kind.value, text: text.value.trim(), name: name.value.trim(), contact: contact.value.trim() });
   const msg = h('p', { class: 'msg', 'aria-live': 'polite' });
   const sms = h('a', { class: 'btn ghost wide sms', hidden: true }, 'Text it instead');
-  const smsHref = () => `sms:${tel}?body=${encodeURIComponent([s?.name, values().text].filter(Boolean).join(': ') + (values().name ? ` (${values().name})` : ''))}`;
+  // ?&body= so the text comes through on an iPhone (which reads &body=) and on Android (which reads the query)
+  const smsHref = () => `sms:${tel}?&body=${encodeURIComponent([s?.name, values().text].filter(Boolean).join(': ') + (values().name ? ` (${values().name})` : ''))}`;
   const send = h('button', { type: 'submit', class: 'btn' }, 'Send');
   const dlg = h('dialog', { class: 'sheet' });
   const form = h('form', { method: 'dialog' },
