@@ -306,12 +306,18 @@ function ownerTools(s) {
       onWritten: () => save({ ...(sys(s.id) || s), tagged: today(), locked: null }), onLocked: () => save({ ...(sys(s.id) || s), locked: today() }) }));
 }
 
-// Saves a page; says so and returns false if the ledger couldn't take it (a page over 45,000 characters).
+// Why the ledger can't take a page ('' when it can): over 45,000 characters, or an id it refuses. An edit sheet says it
+// and stays open (its check); save() says it in a toast.
+const refusedPage = doc => {
+  const why = refusal(doc);
+  return why === 'too big' ? 'Too long to save: over 45,000 characters. Shorten it, or link the manual instead.' : why ? `"${doc.id}" can't be a page's id: letters, digits and dashes only.` : '';
+};
+// Saves a page; says so and returns false if the ledger couldn't take it.
 function save(doc) {
   try { ledger.put('site', doc); }
   catch (e) {
     if (!e.refused) throw e;
-    toast(e.refused === 'too big' ? 'Too long to save: over 45,000 characters. Shorten it, or link the manual instead.' : `"${doc.id}" can't be a page's id: letters, digits and dashes only.`, 'bad');
+    toast(refusedPage(doc), 'bad');
     return false;
   }
   fromLedger(); render(); return true;
@@ -353,7 +359,16 @@ const tenantNotice = () => {
 
 async function editSystem(s) {
   const exists = !!(s?._updated && sys(s.id));   // a sticker page's stub has no saved time: always a new page
-  const v = await sheet({ title: exists ? 'Edit ' + s.name : 'New system', danger: exists ? 'Delete' : null, fields: [
+  const made = v => ({ ...(s || {}), id: s?.id || uniqueId(v.name), name: v.name, where: v.where, kind: v.kind, emergency: v.emergency === 'yes', summary: v.summary,
+    steps: v.steps, facts: parseFacts(v.facts), care: v.care, warn: v.warn, manual: v.manual, order: Number(v.order) || 99 });
+  // a Save that can't go keeps the sheet open with everything typed: too long, an id the ledger refuses, or the ledger
+  // not heard from yet
+  const check = v => {
+    if (!exists && !ledger.synced('site')) return STILL_LOADING;
+    if (s?.id && FRONT.has(s.id)) return `"${s.id}" is the front page's own address: pick another.`;
+    return refusedPage(made(v));
+  };
+  const v = await sheet({ title: exists ? 'Edit ' + s.name : 'New system', danger: exists ? 'Delete' : null, check, fields: [
     { name: 'name', label: 'Name', value: s?.name, required: true },
     { name: 'where', label: 'Where it is', value: s?.where, placeholder: 'Basement, left of the stairs' },
     { name: 'kind', label: 'Group', type: 'select', value: s?.kind || 'other',
@@ -374,13 +389,10 @@ async function editSystem(s) {
     }
     return;
   }
-  if (!exists && !ledger.synced('site')) { toast(STILL_LOADING, 'bad'); return; }
-  if (s?.id && FRONT.has(s.id)) { toast(`"${s.id}" is the front page's own address: pick another.`, 'bad'); return; }
-  const id = s?.id || uniqueId(v.name);
+  const doc = made(v), id = doc.id;
   // the page came in from the ledger while the sheet was open (made on another device): it isn't saved over
   if (!exists && sys(id)) { toast('That page is in the manual now. Open it to edit it.', 'bad'); fromLedger(); go('#' + id); render(); return; }
-  if (!save({ ...(s || {}), id, name: v.name, where: v.where, kind: v.kind, emergency: v.emergency === 'yes', summary: v.summary, steps: v.steps,
-    facts: parseFacts(v.facts), care: v.care, warn: v.warn, manual: v.manual, order: Number(v.order) || 99 })) return;
+  if (!save(doc)) return;
   saidSaved(id);
   if (!exists) go('#' + id);
 }
@@ -393,7 +405,9 @@ function uniqueId(name) {
 
 async function editHouse() {
   const hs = house(), c = hs.contact || {};
-  const v = await sheet({ title: 'The house', fields: [
+  const made = v => ({ ...hs, id: 'house', title: v.title, intro: v.intro, notes: v.notes, contact: { name: v.cname, phone: v.phone, email: v.email, note: v.cnote } });
+  const check = v => !site.some(d => d.id === 'house') && !ledger.synced('site') ? STILL_LOADING : refusedPage(made(v));
+  const v = await sheet({ title: 'The house', check, fields: [
     { name: 'title', label: 'Title', value: hs.title || 'House manual' },
     { name: 'intro', label: 'Welcome line', type: 'textarea', value: hs.intro },
     { name: 'cname', label: 'Who to call', value: c.name, placeholder: 'The property manager' },
@@ -403,21 +417,19 @@ async function editHouse() {
     { name: 'notes', label: 'Good to know (one per line)', type: 'textarea', value: hs.notes },
   ] });
   if (!v || v.__danger) return;
-  if (!site.some(d => d.id === 'house') && !ledger.synced('site')) { toast(STILL_LOADING, 'bad'); return; }
   // there was no house page when the sheet opened, and one came in from the ledger since: it isn't saved over
   if (!hs._updated && house()._updated) { toast('The house page came in from the ledger. Open House and contact again.', 'bad'); render(); return; }
-  if (save({ ...hs, id: 'house', title: v.title, intro: v.intro, notes: v.notes, contact: { name: v.cname, phone: v.phone, email: v.email, note: v.cnote } })) saidSaved('house');
+  if (save(made(v))) saidSaved('house');
 }
 
 async function addFromStarter() {
   const have = new Set(site.map(d => d.id));
   const left = STARTER.filter(s => !have.has(s.id));
-  const v = await sheet({ title: 'Add a system', ok: 'Add', fields: [
+  const v = await sheet({ title: 'Add a system', ok: 'Add', check: v => v.pick && v.pick !== '__new' && !ledger.synced('site') ? STILL_LOADING : '', fields: [
     { name: 'pick', label: 'From the usual list', type: 'select', options: [['', 'Pick one…'], ...left.map(s => [s.id, s.name]), ['__new', 'Something else…']] },
   ] });
   if (!v || !v.pick) return;
   if (v.pick === '__new') return editSystem(null);
-  if (!ledger.synced('site')) { toast(STILL_LOADING, 'bad'); return; }
   // another device added it while the list was open: its page stays as it is
   if (sys(v.pick)) { toast('That page is in the manual now.', 'bad'); fromLedger(); go('#' + v.pick); return; }
   save({ ...STARTER.find(s => s.id === v.pick) });

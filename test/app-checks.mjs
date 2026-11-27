@@ -436,7 +436,28 @@ export async function secondOwnerChecks({ browser, base, assert }) {
     await page.evaluate(() => { const m = window.__placard.ledger.m('site'); m.since = 0; m.listed = false; });
     await page.selectOption('dialog[open] #f-pick', 'septic');
     await page.click('dialog[open] button[type=submit]');
-    await page.waitForSelector('.toast.show >> text=Still loading from the ledger. Try again in a moment.');
+    await page.waitForSelector('dialog[open] .sheet-msg >> text=Still loading from the ledger. Try again in a moment.');
+    assert.equal(await page.inputValue('dialog[open] #f-pick'), 'septic');
+    assert.deepEqual(L.puts.map(d => d.id), ['well-tank']);
+    // and a new page typed out: the sheet stays open with it
+    await page.click('dialog[open] >> text=Cancel');
+    await page.click('text=Add a system');
+    await page.selectOption('dialog[open] #f-pick', '__new');
+    await page.click('dialog[open] button[type=submit]');
+    await page.fill('dialog[open] #f-name', 'Attic fan');
+    await page.fill('dialog[open] #f-steps', 'Switch on the hall wall.');
+    await page.click('dialog[open] button[type=submit]');
+    await page.waitForSelector('dialog[open] .sheet-msg >> text=Still loading from the ledger. Try again in a moment.');
+    assert.deepEqual([await page.inputValue('dialog[open] #f-name'), await page.inputValue('dialog[open] #f-steps')], ['Attic fan', 'Switch on the hall wall.'], 'the refused Save lost what was typed');
+    await page.click('dialog[open] >> text=Cancel');
+    // House and contact with no house page in the copy, the same (the page isn't drawn again, so its buttons still work)
+    await page.evaluate(() => { delete window.__placard.ledger.m('site').docs.house; });
+    await page.click('text=House and contact');
+    await page.fill('dialog[open] #f-phone', '555-0100');
+    await page.click('dialog[open] button[type=submit]');
+    await page.waitForSelector('dialog[open] .sheet-msg >> text=Still loading from the ledger. Try again in a moment.');
+    assert.equal(await page.inputValue('dialog[open] #f-phone'), '555-0100');
+    await page.click('dialog[open] >> text=Cancel');
     assert.deepEqual(L.puts.map(d => d.id), ['well-tank']);
     // pages another device made come in while this one makes them: Make this page and Add a system leave them as they
     // were, whether they arrive in the press's own catch-up or while the sheet is open
@@ -642,9 +663,12 @@ export async function appChecks({ page, ctx, base, assert }) {
   // a page too long for the ledger (a whole manual pasted in) says so, and the page keeps what it had
   await page.click('text=Edit this page');
   await page.fill('#f-care', 'x'.repeat(46000));
+  await page.fill('#f-warn', 'Hot water: 120 °F at the dial.');
   await page.click('dialog >> button[type=submit]');
-  await page.waitForSelector('.toast.show >> text=Too long to save');
+  await page.waitForSelector('dialog[open] .sheet-msg >> text=Too long to save: over 45,000 characters. Shorten it, or link the manual instead.');
+  assert.equal(await page.inputValue('#f-warn'), 'Hot water: 120 °F at the dial.', 'the refused Save lost what was typed');
   assert.equal(await page.evaluate(() => (window.__placard.ledger.doc('site', 'water-heater').care || '').length < 46000), true);
+  await page.click('dialog[open] >> text=Cancel');
   // a page that doesn't fit is deleted, then an updated import file comes (blank Where lines and contact, new details):
   // it fills in, never blanks or replaces what's here, and the deleted page stays deleted; twice over, nothing changes
   await page.evaluate(() => { location.hash = '#smoke-co'; });
