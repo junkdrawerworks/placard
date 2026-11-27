@@ -56,47 +56,47 @@ export async function tenantChecks({ browser, base, assert }) {
     L.delay = 0;
     // the report form: an urgent line with the number to call, and the field only robots fill in, out of sight
     await page.click('text=Report a problem or log a visit');
-    assert.equal(await text('dialog .call-now'), 'Urgent? Call 555-0142 now.');
-    assert.equal(await page.locator('dialog .call-now a').getAttribute('href'), 'tel:5550142');
-    const trap = await page.locator('#f-website').evaluate(el => ({ tab: el.tabIndex, auto: el.autocomplete, name: el.name,
+    assert.equal(await text('dialog[open] .call-now'), 'Urgent? Call 555-0142 now.');
+    assert.equal(await page.locator('dialog[open] .call-now a').getAttribute('href'), 'tel:5550142');
+    const trap = await page.locator('dialog[open] #f-website').evaluate(el => ({ tab: el.tabIndex, auto: el.autocomplete, name: el.name,
       hidden: el.closest('[aria-hidden="true"]') !== null, off: el.getBoundingClientRect().right <= 0 }));
     assert.deepEqual(trap, { tab: -1, auto: 'off', name: 'website', hidden: true, off: true }, 'the robot field is missing or in sight');
     // sent on one bar that then drops: Send waits, and nothing typed is lost
     L.delay = 1200; L.down = true;
-    await page.fill('#f-text', 'Water on the floor under the tank');
-    await page.fill('#f-name', 'Pat');
-    await page.click('dialog button[type=submit]');
+    await page.fill('dialog[open] #f-text', 'Water on the floor under the tank');
+    await page.fill('dialog[open] #f-name', 'Pat');
+    await page.click('dialog[open] button[type=submit]');
     await page.waitForTimeout(300);
-    assert.deepEqual(await page.locator('dialog button[type=submit]').evaluate(b => [b.disabled, b.textContent]), [true, 'Sending…'], 'Send isn\'t held while it sends');
-    await page.waitForSelector('dialog .msg.bad');
-    assert.equal(await text('dialog .msg.bad'), 'Couldn\'t send it. Your message is kept: try again, or call.');
-    assert.equal(await page.inputValue('#f-text'), 'Water on the floor under the tank', 'a failed send threw the text away');
-    assert.equal(await page.locator('dialog a.sms').getAttribute('href'), 'sms:5550142?body=' + encodeURIComponent('Water heater: Water on the floor under the tank (Pat)'));
-    assert.equal(await page.locator('dialog button[type=submit]').evaluate(b => b.disabled), false, 'Send stays off after a failure');
+    assert.deepEqual(await page.locator('dialog[open] button[type=submit]').evaluate(b => [b.disabled, b.textContent]), [true, 'Sending…'], 'Send isn\'t held while it sends');
+    await page.waitForSelector('dialog[open] .msg.bad');
+    assert.equal(await text('dialog[open] .msg.bad'), 'Couldn\'t send it. Your message is kept: try again, or call.');
+    assert.equal(await page.inputValue('dialog[open] #f-text'), 'Water on the floor under the tank', 'a failed send threw the text away');
+    assert.equal(await page.locator('dialog[open] a.sms').getAttribute('href'), 'sms:5550142?body=' + encodeURIComponent('Water heater: Water on the floor under the tank (Pat)'));
+    assert.equal(await page.locator('dialog[open] button[type=submit]').evaluate(b => b.disabled), false, 'Send stays off after a failure');
     // closed, and the page opened again later: the form comes back with what was typed
-    await page.click('dialog >> text=Cancel');
+    await page.click('dialog[open] >> text=Cancel');
     await page.reload();
     await page.waitForSelector('.tape >> text=Water heater');
     await page.click('text=Report a problem or log a visit');
-    assert.deepEqual([await page.inputValue('#f-text'), await page.inputValue('#f-name')], ['Water on the floor under the tank', 'Pat'], 'the unsent report was lost');
+    assert.deepEqual([await page.inputValue('dialog[open] #f-text'), await page.inputValue('dialog[open] #f-name')], ['Water on the floor under the tank', 'Pat'], 'the unsent report was lost');
     // the signal is back: it goes, the form closes, and a line stays on the page
     L.delay = 0; L.down = false;
-    await page.click('dialog button[type=submit]');
+    await page.click('dialog[open] button[type=submit]');
     await page.waitForSelector('.toast.show >> text=Sent. The owner gets it by email.');
     assert.equal(await page.locator('dialog[open]').count(), 0);
     assert.match(await text('.sent'), /^Sent to the owner at \d{1,2}:\d\d [ap]m\.$/);
     assert.deepEqual(L.reports.map(r => [r.system, r.text, r.name, r.website]), [['water-heater', 'Water on the floor under the tank', 'Pat', '']]);
     assert.equal(await page.evaluate(() => JSON.stringify(JSON.parse(localStorage.getItem('placard.draft') || '{}')['water-heater'] || null)), 'null', 'the draft was kept after it sent');
     await page.click('text=Report a problem or log a visit');
-    assert.equal(await page.inputValue('#f-text'), '', 'the sent report came back in the form');
-    await page.click('dialog >> text=Cancel');
+    assert.equal(await page.inputValue('dialog[open] #f-text'), '', 'the sent report came back in the form');
+    await page.click('dialog[open] >> text=Cancel');
     // the front page has the form too; when the ledger kept it but couldn't email, it says to call if it's urgent
     await page.goto(base + '#');
     await page.waitForSelector('.urgent-tile');
     L.emailed = false;
     await page.click('text=Report a problem');
-    await page.fill('#f-text', 'The porch light is out.');
-    await page.click('dialog button[type=submit]');
+    await page.fill('dialog[open] #f-text', 'The porch light is out.');
+    await page.click('dialog[open] button[type=submit]');
     await page.waitForSelector('.toast.show >> text=Saved for the owner. If it\'s urgent, call.');
     assert.match(await text('.sent'), /^Saved for the owner at \d{1,2}:\d\d [ap]m\. If it's urgent, call\.$/);
     assert.deepEqual([L.reports[1].system, L.reports[1].text], ['', 'The porch light is out.']);
