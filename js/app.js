@@ -1,6 +1,6 @@
 // Placard: a house manual on stickers. Tenants tap a sticker and get that system's page with no app and no sign-in;
 // the owner, connected to the ledger, edits the pages, writes and locks the stickers and reads the reports.
-import { $, h, mount, toast, sheet, confirmSheet, route, go, dayText, stampText, qrSvg, today } from './kit/ui.js';
+import { $, h, mount, toast, sheet, confirmSheet, route, go, stampText, qrSvg, today } from './kit/ui.js';
 import { Ledger, watchConnectLinks, publicRead, publicReport, refusal, importText } from './kit/ledger.js';
 import { tagUrl } from './kit/tags.js';
 import { nfcPanel } from './kit/panel.js';
@@ -115,9 +115,9 @@ function ownerTools(s) {
   return h('section', { class: 'owner card' },
     h('h2', {}, 'Owner'),
     h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn', onclick: () => editSystem(s) }, 'Edit this page')),
-    nfcPanel(tagUrl('h', s.id), { lock: true, label: 'Write sticker',
-      note: s.locked ? `Locked ${dayText(s.locked)}.` : s.tagged ? `Written ${dayText(s.tagged)}, not locked yet.` : 'Not written yet.',
-      onWritten: () => save({ ...s, tagged: today() }), onLocked: () => save({ ...s, locked: today() }) }));
+    // A new sticker written for a locked page (a replacement or a spare) is written, not locked, until it's locked too.
+    nfcPanel(tagUrl('h', s.id), { lock: true, label: 'Write sticker', tagged: s.tagged, locked: s.locked,
+      onWritten: () => save({ ...(sys(s.id) || s), tagged: today(), locked: null }), onLocked: () => save({ ...(sys(s.id) || s), locked: today() }) }));
 }
 
 // Saves a page; says so and returns false if the ledger couldn't take it (a page over 45,000 characters).
