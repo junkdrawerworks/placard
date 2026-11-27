@@ -203,6 +203,12 @@ function save(doc) {
   }
   site = ledger.docs('site'); render(); return true;
 }
+// After a save: tenants see it only once it has reached the sheet, so say which. (A send already on its way when the
+// save was made can come back first; the save goes in the next one.)
+async function saidSaved(id) {
+  for (let i = 0; i < 3 && ledger.waiting('site').includes(id); i++) if (!(await ledger.flush())) break;
+  toast(ledger.waiting('site').includes(id) ? 'Saved on this device. Tenants see it once it\'s sent.' : 'Saved. Tenants see it now.');
+}
 
 async function editSystem(s) {
   const exists = !!(s && sys(s.id));
@@ -229,7 +235,7 @@ async function editSystem(s) {
   const id = s?.id || uniqueId(v.name);
   if (!save({ ...(s || {}), id, name: v.name, where: v.where, kind: v.kind, emergency: v.emergency === 'yes', summary: v.summary, steps: v.steps,
     facts: parseFacts(v.facts), care: v.care, warn: v.warn, manual: v.manual, order: Number(v.order) || 99 })) return;
-  toast('Saved. Tenants see it now.');
+  saidSaved(id);
   if (!exists) go('#' + id);
 }
 function uniqueId(name) {
@@ -251,7 +257,7 @@ async function editHouse() {
     { name: 'notes', label: 'Good to know (one per line)', type: 'textarea', value: hs.notes },
   ] });
   if (!v || v.__danger) return;
-  save({ ...hs, id: 'house', title: v.title, intro: v.intro, notes: v.notes, contact: { name: v.cname, phone: v.phone, email: v.email, note: v.cnote } });
+  if (save({ ...hs, id: 'house', title: v.title, intro: v.intro, notes: v.notes, contact: { name: v.cname, phone: v.phone, email: v.email, note: v.cnote } })) saidSaved('house');
 }
 
 async function addFromStarter() {
@@ -292,8 +298,7 @@ function renderOwner() {
   return [
     h('p', { class: 'crumb' }, h('a', { href: '#' }, '‹ Tenant view')),
     h('h2', {}, 'Edit the manual'),
-    h('p', { class: 'sync ' + ledger.state }, ledger.statusText()),
-    !LEDGER_URL && !demo ? h('div', { class: 'notice warn' }, h('p', {}, h('b', {}, 'Tenants can\'t see this yet. '), 'Put the ledger address in js/config.js in the repo (Part 4 of the guide).')) : null,
+    !LEDGER_URL && !demo ? h('div', { class: 'notice warn' }, h('p', {}, h('b', {}, 'Tenants can\'t see this yet. '), 'Put the ledger address in js/config.js in the repo (Part 1 of the guide).')) : null,
     h('div', { class: 'btns' },
       h('button', { type: 'button', class: 'btn', onclick: editHouse }, 'House and contact'),
       h('button', { type: 'button', class: 'btn ghost', onclick: addFromStarter }, 'Add a system'),
@@ -359,7 +364,8 @@ function render() {
     const s = sys(r.id), wait = owner() ? ledger.notReady('site') : site.length ? '' : 'Loading…', badId = owner() && refusal({ id: r.id });
     body = s ? renderSystem(s) : wait ? [h('p', { class: 'crumb' }, h('a', { href: '#' }, '‹ House manual')), h('p', { class: 'empty' }, wait)] : renderNotFound(r.id, badId); }
   else body = renderHome();
-  mount(app, body);
+  // The owner sees the ledger's status line on every page, as in the other tag apps (tenants never do).
+  mount(app, owner() ? h('p', { class: 'sync ' + ledger.state }, ledger.statusText()) : null, body);
   $('#edit-link').hidden = !owner();
   document.title = r.view === 'item' && sys(r.id) ? `${sys(r.id).name} · Placard` : 'Placard';
   if (demo) $('#demo-note').hidden = false;

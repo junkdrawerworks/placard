@@ -110,8 +110,42 @@ export async function tenantChecks({ browser, base, assert }) {
   } finally { await ctx.close(); }
 }
 
+// The owner, connected (not the sample): the status line on every page, whether a save has reached tenants, and the
+// guide part that puts the ledger address in js/config.js.
+export async function ownerChecks({ browser, base, assert }) {
+  const { ctx, L, errors, page } = await phone(browser, base, { published: false });
+  await ctx.addInitScript(u => localStorage.setItem('placard.ledger', JSON.stringify({ url: u, key: 'k'.repeat(40) })), LEDGER);
+  const text = sel => page.locator(sel).evaluate(el => el.textContent.replace(/\s+/g, ' ').trim());
+  try {
+    await page.goto(base + '#/owner');
+    await page.waitForFunction(() => document.querySelector('.sync')?.textContent === 'Up to date');
+    assert.match(await text('#app .notice.warn'), /Put the ledger address in js\/config\.js in the repo \(Part 1 of the guide\)\./);
+    await page.goto(base + '#water-heater');
+    await page.waitForSelector('.tape >> text=Water heater');
+    assert.equal(await text('#app > .sync:first-child'), 'Up to date', 'no status line on a page the owner edits');
+    await page.click('text=Edit this page');
+    await page.fill('#f-where', 'Basement, under the stairs.');
+    await page.click('dialog >> button[type=submit]');
+    await page.waitForSelector('.toast.show >> text=Saved. Tenants see it now.');
+    assert.equal(L.puts.at(-1).where, 'Basement, under the stairs.');
+    // with no signal the edit waits on this phone, and says so
+    L.down = true;
+    await page.click('text=Edit this page');
+    await page.fill('#f-where', 'Basement, left of the stairs.');
+    await page.click('dialog >> button[type=submit]');
+    await page.waitForSelector('.toast.show >> text=Saved on this device. Tenants see it once it\'s sent.');
+    await page.waitForFunction(() => document.querySelector('.sync')?.textContent === 'Offline — 1 waiting');
+    L.down = false;
+    await page.evaluate(() => dispatchEvent(new Event('online')));
+    await page.waitForFunction(() => /^(Saved|Up to date)$/.test(document.querySelector('.sync')?.textContent));
+    assert.equal(L.puts.at(-1).where, 'Basement, left of the stairs.');
+    assert.deepEqual(errors, [], 'errors on the owner pages');
+  } finally { await ctx.close(); }
+}
+
 export async function appChecks({ page, ctx, base, assert }) {
   await tenantChecks({ browser: ctx.browser(), base, assert });
+  await ownerChecks({ browser: ctx.browser(), base, assert });
   // a tenant on an unpublished manual
   assert.match(await page.locator('#app').innerText(), /Not published yet/);
   // the sample house, as a tenant would see it after tapping a sticker
