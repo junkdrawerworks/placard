@@ -17,17 +17,21 @@ const fakeNfc = () => {
 // A phone on a published manual: js/config.js as served carries a ledger address (published: true), and a pretend
 // ledger answers it with the sample house. L.down: every request fails; L.delay: each waits that long (Google waking
 // the script); L.hang: Google takes each request and never answers (one bar); L.emailed: what a report's answer says. The service worker is off, so every request reaches the routes.
+// published: the address put in js/config.js (true: LEDGER). OTHER is another deployment that answers with the same
+// pages; any other script.google.com address answers 404, as a mistyped or archived one does.
+const OTHER = 'https://script.google.com/macros/s/AKfyOTHER/exec';
 async function phone(browser, base, { published = true, dark = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true,
     colorScheme: dark ? 'dark' : 'light', serviceWorkers: 'block' });
   const L = { down: false, delay: 0, hang: false, held: [], emailed: true, reports: [], puts: [], site: structuredClone(SAMPLE['placard.site']) };
   if (published) await ctx.route(base + 'js/config.js', async r => r.fulfill({ contentType: 'text/javascript',
-    body: (await readFile(join(root, 'js/config.js'), 'utf8')).replace("LEDGER_URL = ''", `LEDGER_URL = '${LEDGER}'`) }));
+    body: (await readFile(join(root, 'js/config.js'), 'utf8')).replace("LEDGER_URL = ''", `LEDGER_URL = '${published === true ? LEDGER : published}'`) }));
   await ctx.route('https://script.google.com/**', async r => {
     if (L.hang) { await new Promise(res => L.held.push(res)); return r.abort().catch(() => {}); }   // taken, never answered
     if (L.delay) await new Promise(res => setTimeout(res, L.delay));
     if (L.down) return r.abort('internetdisconnected');
     const req = r.request(), json = o => r.fulfill({ contentType: 'application/json', body: JSON.stringify(o) });
+    if (!req.url().startsWith(LEDGER) && !req.url().startsWith(OTHER)) return r.fulfill({ status: 404, contentType: 'text/html', body: '<!DOCTYPE html><title>Page Not Found</title>' });
     if (req.method() === 'GET') return json(new URL(req.url()).searchParams.get('op') === 'pub' ? { ok: true, docs: L.site } : { ok: true, app: 'switchboard-ledger', version: '1.1' });
     const b = JSON.parse(req.postData() || '{}');
     if (b.op === 'report') { L.reports.push(b.doc); return json({ ok: true, emailed: L.emailed }); }
@@ -143,15 +147,18 @@ export async function tenantChecks({ browser, base, assert }) {
 // back; a phone with a copy shows it, says how old it is, and the line goes after the next good read.
 export async function retryChecks({ browser, base, assert }) {
   const { ctx, L, errors, page } = await phone(browser, base);
-  // no signal as the phone sees it: navigator.onLine follows test.offline
-  await ctx.addInitScript(() => Object.defineProperty(Navigator.prototype, 'onLine', { configurable: true, get: () => !localStorage.getItem('test.offline') }));
-  const offline = on => page.evaluate(on => { if (on) localStorage.setItem('test.offline', '1'); else { localStorage.removeItem('test.offline'); dispatchEvent(new Event('online')); } }, on);
+  // no signal as the phone sees it: navigator.onLine is false while the cookie offline=1 is set
+  await ctx.addInitScript(() => Object.defineProperty(Navigator.prototype, 'onLine', { configurable: true, get: () => !document.cookie.includes('offline=1') }));
+  const offline = async on => {
+    if (on) await ctx.addCookies([{ name: 'offline', value: '1', url: base }]);
+    else { await ctx.clearCookies(); await page.evaluate(() => dispatchEvent(new Event('online'))).catch(() => {}); }
+  };
   const text = sel => page.locator(sel).evaluate(el => el.textContent.replace(/\s+/g, ' ').trim());
   try {
     // a first visit with no signal: No connection, and a Try again a thumb can hit
     L.down = true;
-    await page.goto(base + '#water-heater');
     await offline(true);
+    await page.goto(base + '#water-heater');
     await page.waitForSelector('text=No connection.');
     const again = page.locator('#app button', { hasText: 'Try again' });
     assert.ok((await again.boundingBox())?.height >= 44, 'no Try again button, or one too small to tap');
@@ -178,9 +185,17 @@ export async function retryChecks({ browser, base, assert }) {
     await offline(false);
     await page.waitForFunction(() => !document.querySelector('.stale'), null, { timeout: 2000 });
     assert.equal(await page.locator('.contact a[href^="tel:"]').getAttribute('href'), 'tel:5550999');
-    // Try again on its own, with no online event: a first visit, then the signal back and a press
-    await page.evaluate(() => localStorage.removeItem('placard.public'));
+    // a phone with signal whose read fails (config.js wrong, the deployment gone) isn't told it has no signal
     L.down = true;
+    await page.reload();
+    await page.waitForSelector('.stale');
+    assert.match(await text('.stale p'), /^The latest didn't load\. This is the copy saved today at \d{1,2}:\d\d [ap]m\. A number may have changed since\.$/);
+    await page.evaluate(() => localStorage.removeItem('placard.public'));
+    await page.reload();
+    await page.waitForSelector('#app .notice.warn');
+    assert.equal(await text('#app .notice.warn p'), 'The house manual didn\'t load. Try again in a minute, or call the number you were given.');
+    // Try again on its own, with no online event: the signal back and a press
+    await offline(true);
     await page.reload();
     await page.waitForSelector('text=No connection.');
     L.down = false;
@@ -193,14 +208,17 @@ export async function retryChecks({ browser, base, assert }) {
 // The owner, connected (not the sample): the status line on every page, whether a save has reached tenants, and the
 // guide part that puts the ledger address in js/config.js.
 export async function ownerChecks({ browser, base, assert }) {
-  const { ctx, L, errors, page } = await phone(browser, base, { published: false });
+  const { ctx, L, errors, page } = await phone(browser, base);
   await ctx.addInitScript(u => localStorage.setItem('placard.ledger', JSON.stringify({ url: u, key: 'k'.repeat(40) })), LEDGER);
   await ctx.addInitScript(fakeNfc);
   const text = sel => page.locator(sel).evaluate(el => el.textContent.replace(/\s+/g, ' ').trim());
   try {
     await page.goto(base + '#/owner');
     await page.waitForFunction(() => document.querySelector('.sync')?.textContent === 'Up to date');
-    assert.match(await text('#app .notice.warn'), /Put the ledger address in js\/config\.js in the repo \(Part 1 of the guide\)\./);
+    // js/config.js has this phone's address and it answers a tenant's read: no notice, and the way back is the front page
+    await page.waitForTimeout(500);
+    assert.equal(await page.locator('#app .notice').count(), 0, 'a notice about tenants when they can read the manual');
+    assert.equal(await text('.crumb a'), '‹ Front page');
     await page.goto(base + '#water-heater');
     await page.waitForSelector('.tape >> text=Water heater');
     assert.equal(await text('#app > .sync:first-child'), 'Up to date', 'no status line on a page the owner edits');
@@ -270,6 +288,33 @@ export async function ownerChecks({ browser, base, assert }) {
     assert.ok(L.puts.at(-1).id === 'house' && L.puts.at(-1).locked, 'the lock never reached the ledger');
     assert.deepEqual(errors, [], 'errors on the owner pages');
   } finally { await ctx.close(); }
+}
+
+// What the owner is told about what tenants get: js/config.js empty, an address that answers 404 (mistyped, or a
+// deployment since archived), and another deployment's address. "Tenants see it now" only when they do.
+export async function configChecks({ browser, base, assert }) {
+  for (const [config, notice, said] of [
+    [false, /^Tenants can't see this yet\. Put the ledger address in js\/config\.js in the repo \(Part 1 of the guide\)\.$/, 'Saved. Tenants see it once js/config.js has the ledger address.'],
+    ['https://script.google.com/macros/s/AKfyARCHIVED/exec', /^Tenants can't open the manual: the address in js\/config\.js didn't answer\. Put this phone's address in it \(Part 1 of the guide\)\.$/,
+      'Saved. Tenants can\'t open the manual: the address in js/config.js didn\'t answer.'],
+    [OTHER, /^Tenants may be reading another ledger: the address in js\/config\.js isn't this phone's ledger address\. Put this phone's address in it \(Part 1 of the guide\)\.$/,
+      'Saved. Tenants may not see it: js/config.js has another ledger address.']]) {
+    const { ctx, L, errors, page } = await phone(browser, base, { published: config });
+    await ctx.addInitScript(u => localStorage.setItem('placard.ledger', JSON.stringify({ url: u, key: 'k'.repeat(40) })), LEDGER);
+    try {
+      await page.goto(base + '#/owner');
+      await page.waitForSelector('#app .notice.warn', { timeout: 8000 });
+      assert.match(await page.locator('#app .notice.warn').evaluate(el => el.textContent), notice);
+      await page.goto(base + '#water-heater');
+      await page.click('text=Edit this page');
+      await page.fill('#f-where', 'Basement, under the stairs.');
+      await page.click('dialog >> button[type=submit]');
+      await page.waitForSelector('#toast.show');
+      assert.equal(await page.locator('#toast').textContent(), said);
+      assert.equal(L.puts.at(-1).where, 'Basement, under the stairs.', 'the edit didn\'t reach the ledger');
+      assert.deepEqual(errors, [], 'errors on the owner pages');
+    } finally { await ctx.close(); }
+  }
 }
 
 // A second owner device (the laptop), connected while Google takes 3 s to answer its first list: Add a system, House
@@ -388,6 +433,7 @@ export async function appChecks({ page, ctx, base, assert }) {
   await secondOwnerChecks({ browser: ctx.browser(), base, assert });
   await oddRecordChecks({ browser: ctx.browser(), base, assert });
   await retryChecks({ browser: ctx.browser(), base, assert });
+  await configChecks({ browser: ctx.browser(), base, assert });
   // a tenant on an unpublished manual
   assert.match(await page.locator('#app').innerText(), /Not published yet/);
   // the sample house, as a tenant would see it after tapping a sticker

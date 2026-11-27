@@ -84,14 +84,17 @@ function readPublic() {
       copyAt = Date.now(); jset(PUBLIC, { at: copyAt, docs });
       site = pages(docs); siteError = ''; stale = '';
     } catch (e) {
-      if (site.length) stale = 'offline'; else siteError = 'offline';
+      // no signal (or one bar that never answers), or a phone online whose read failed: the address in config.js
+      // is wrong or its deployment gone, which a signal won't mend
+      const why = !navigator.onLine || e.kind === 'offline' ? 'offline' : 'noload';
+      if (site.length) stale = why; else siteError = why;
       again = setTimeout(readPublic, AGAIN);
     } finally { loading = false; reading = null; clearTimeout(slowly); }
     render();
   })();
   return reading;
 }
-const failing = () => !owner() && !!LEDGER_URL && (!!stale || siteError === 'offline');
+const failing = () => !owner() && !!LEDGER_URL && (!!stale || siteError === 'offline' || siteError === 'noload');
 window.addEventListener('online', () => { if (failing()) readPublic(); });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && failing()) readPublic(); });
 const tryAgain = () => h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn ghost', onclick: e => {
@@ -107,7 +110,7 @@ const savedWhen = at => {
 function staleNotice() {
   if (owner() || !stale || !site.length) return null;
   return h('div', { class: 'notice warn stale' },
-    h('p', {}, h('b', {}, 'No signal. '), `This is the copy saved ${savedWhen(copyAt)}. A number may have changed since.`));
+    h('p', {}, h('b', {}, stale === 'offline' ? 'No signal. ' : 'The latest didn\'t load. '), `This is the copy saved ${savedWhen(copyAt)}. A number may have changed since.`));
 }
 
 // ---------------------------------------------------------------- tenant pages
@@ -285,8 +288,33 @@ function save(doc) {
 // save was made can come back first; the save goes in the next one.)
 async function saidSaved(id) {
   for (let i = 0; i < 3 && ledger.waiting('site').includes(id); i++) if (!(await ledger.flush())) break;
-  toast(ledger.waiting('site').includes(id) ? 'Saved on this device. Tenants see it once it\'s sent.' : 'Saved. Tenants see it now.');
+  if (ledger.waiting('site').includes(id)) { toast('Saved on this device. Tenants see it once it\'s sent.'); return; }
+  if (demo) { toast('Saved. Tenants see it now.'); return; }
+  if (!LEDGER_URL) { toast('Saved. Tenants see it once js/config.js has the ledger address.'); return; }
+  const seen = await checkTenants();
+  toast(seen === 'ok' ? 'Saved. Tenants see it now.' : seen === 'other' ? 'Saved. Tenants may not see it: js/config.js has another ledger address.'
+    : seen === 'failed' ? 'Saved. Tenants can\'t open the manual: the address in js/config.js didn\'t answer.' : 'Saved.', seen === 'ok' || !seen ? '' : 'bad');
 }
+
+// What tenants get: the owner's phone reads LEDGER_URL as a tenant's would (no key), once each time the Edit screen
+// opens and after a save. 'ok', 'other' (it answers, but isn't this phone's ledger address), 'failed' (it didn't
+// answer: a mistyped address, or a deployment archived or not set to Anyone), or '' (couldn't tell: no signal here).
+let tenants = '';
+async function checkTenants() {
+  if (demo || !LEDGER_URL) return '';
+  try { await publicRead(LEDGER_URL, 'placard', 'site'); tenants = LEDGER_URL.trim() === ledger.cfg.url ? 'ok' : 'other'; }
+  catch (e) { tenants = !navigator.onLine || e.kind === 'offline' || ledger.state === 'offline' ? '' : 'failed'; }
+  if (route().view === 'owner') render();
+  return tenants;
+}
+const tenantNotice = () => {
+  const fix = 'Put this phone\'s address in it (Part 1 of the guide).';
+  if (demo) return null;
+  if (!LEDGER_URL) return h('div', { class: 'notice warn' }, h('p', {}, h('b', {}, 'Tenants can\'t see this yet. '), 'Put the ledger address in js/config.js in the repo (Part 1 of the guide).'));
+  if (tenants === 'failed') return h('div', { class: 'notice warn' }, h('p', {}, h('b', {}, 'Tenants can\'t open the manual: '), 'the address in js/config.js didn\'t answer. ' + fix));
+  if (tenants === 'other') return h('div', { class: 'notice warn' }, h('p', {}, h('b', {}, 'Tenants may be reading another ledger: '), 'the address in js/config.js isn\'t this phone\'s ledger address. ' + fix));
+  return null;
+};
 
 async function editSystem(s) {
   const exists = !!(s && sys(s.id));
@@ -381,9 +409,9 @@ function renderOwner() {
   const list = systems();
   const reports = ledger.docs('reports').filter(r => r.status !== 'handled'), wait = ledger.notReady('site');
   return [
-    h('p', { class: 'crumb' }, h('a', { href: '#' }, '‹ Tenant view')),
+    h('p', { class: 'crumb' }, h('a', { href: '#' }, '‹ Front page')),
     h('h2', {}, 'Edit the manual'),
-    !LEDGER_URL && !demo ? h('div', { class: 'notice warn' }, h('p', {}, h('b', {}, 'Tenants can\'t see this yet. '), 'Put the ledger address in js/config.js in the repo (Part 1 of the guide).')) : null,
+    tenantNotice(),
     h('div', { class: 'btns' },
       h('button', { type: 'button', class: 'btn', disabled: !!wait, onclick: fresh(editHouse) }, 'House and contact'),
       h('button', { type: 'button', class: 'btn ghost', disabled: !!wait, onclick: fresh(addFromStarter) }, 'Add a system'),
@@ -453,13 +481,17 @@ function renderNotFound(id, badId) {
 }
 
 // ---------------------------------------------------------------- frame
+let lastView = '';
 function render() {
   const r = route();
+  if (r.view === 'owner' && lastView !== 'owner' && owner()) checkTenants();
+  lastView = r.view;
   document.body.classList.toggle('is-owner', owner());
   let body;
   if (!owner() && !site.length && loading) body = [h('div', { class: 'notice' }, h('p', {}, h('b', {}, 'Loading the house manual… '), 'The first time takes a few seconds.', slow ? ' Taking longer than usual.' : ''))];
   else if (!owner() && !site.length && siteError === 'unset') body = [h('div', { class: 'notice' }, h('p', {}, h('b', {}, 'Not published yet. '), 'This house manual hasn\'t been put online. If you tapped a sticker, please call the number you were given.'))];
   else if (!owner() && !site.length && siteError === 'offline') body = [h('div', { class: 'notice warn' }, h('p', {}, h('b', {}, 'No connection. '), 'The house manual needs a signal the first time. Try again near a window, or call the number you were given.'), tryAgain())];
+  else if (!owner() && !site.length && siteError === 'noload') body = [h('div', { class: 'notice warn' }, h('p', {}, h('b', {}, 'The house manual didn\'t load. '), 'Try again in a minute, or call the number you were given.'), tryAgain())];
   else if (r.view === 'owner' && owner()) body = renderOwner();
   else if (r.view === 'print' && owner()) body = renderPrint();
   else if (r.view === 'reports' && owner()) body = renderReports();
