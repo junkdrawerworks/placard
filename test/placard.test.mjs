@@ -9,6 +9,9 @@ test('details lines round-trip', () => {
 });
 test('steps drop their own numbering', () => {
   assert.deepEqual(lines('1. Turn it\n2) Wait\n- Call\n\n'), ['Turn it', 'Wait', 'Call']);
+  // and keep a number a line starts with
+  assert.deepEqual(lines('0.5 inch of water in the tray is normal.\n-5°F or colder: leave the kitchen tap dripping.\n1.5 turns opens it'),
+    ['0.5 inch of water in the tray is normal.', '-5°F or colder: leave the kitchen tap dripping.', '1.5 turns opens it']);
 });
 test('starter ids are unique and tag-safe', () => {
   const ids = STARTER.map(s => s.id);

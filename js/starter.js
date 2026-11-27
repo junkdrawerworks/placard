@@ -1,6 +1,7 @@
 // The systems most houses have, as a starting list for the owner, and a made-up house for the sample mode; and how an
 // import file goes over the pages already here.
 import { fillIn, refusal } from './kit/ledger.js';
+import { lines } from './kit/ui.js';
 export const KINDS = [
   ['water', 'Water'], ['power', 'Power'], ['heat', 'Heating and cooling'], ['safety', 'Safety'], ['appliance', 'Appliances'], ['other', 'Everything else'],
 ];
@@ -34,7 +35,7 @@ export function parseFacts(text) {
   });
 }
 export const factsText = facts => (facts || []).map(([k, v]) => (k ? `${k}: ${v}` : v)).join('\n');
-export const lines = text => String(text || '').split('\n').map(l => l.replace(/^\s*(\d+[.)]|[-*•])\s*/, '').trim()).filter(Boolean);
+export { lines };   // the kit's: one entry per line, typed numbering and bullets taken off
 
 export const SAMPLE = {
   'placard.site': [
