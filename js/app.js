@@ -179,14 +179,37 @@ function renderSystem(s) {
 }
 
 // The report form. A report typed on one bar in a basement must not be lost: what's typed stays on the phone
-// (placard.draft, one per page) until a send works, and the form opens with it next time. Send waits for the answer;
-// if it fails the form stays open with the text, says so, and offers a text message to the house contact instead.
+// (placard.draft, one per page, with the time it was typed) until a send works, and the form opens with it next time.
+// Send waits for the answer; if it fails the form stays open with the text, says so, and offers a text message to the
+// house contact instead. Once the form is closed, a line under the report button says it hasn't gone, with Send it now.
+// Nothing sends it by itself: a report Google got but answered late would go twice.
 const DRAFTS = 'placard.draft';
 const draftOf = key => (jget(DRAFTS) || {})[key] || null;
 const keepDraft = (key, v) => {
   const all = jget(DRAFTS) || {};
-  if (v && (v.text || v.name || v.contact)) all[key] = v; else delete all[key];
+  if (v && (v.text || v.name || v.contact)) all[key] = { ...v, at: Date.now() }; else delete all[key];
   jset(DRAFTS, all);
+};
+// Sends a report from this page (s: the page, or null for the front page); resolves to whether the owner was emailed,
+// or throws if it didn't go. The draft goes once the ledger has it.
+async function sendReport(s, v, website = '') {
+  const key = s?.id || '';
+  const doc = { kind: v.kind, text: v.text, name: v.name, contact: v.contact, website, system: s?.id || '', systemName: s?.name || '' };
+  const j = demo ? ledger.demo.handle({ op: 'report', app: 'placard', coll: 'reports', doc })
+    : await publicReport(owner() ? ledger.cfg.url : LEDGER_URL, 'placard', 'reports', doc);
+  const emailed = j?.emailed !== false;  // a ledger script before 1.1 doesn't say: it always tried
+  keepDraft(key, null);
+  sent[key] = { at: Date.now(), emailed };
+  try { sessionStorage.setItem('placard.sent', JSON.stringify(sent)); } catch {}
+  return emailed;
+}
+const sentToast = emailed => toast(emailed ? 'Sent. The owner gets it by email.' : 'Saved for the owner. If it\'s urgent, call.');
+const failLine = err => /too many/.test(err.message) ? 'Too many reports this hour. Your message is kept: please call.' : 'Couldn\'t send it. Your message is kept: try again, or call.';
+// "No hot water since the power cut this…"
+const excerpt = t => (t.length > 40 ? t.slice(0, 40).replace(/\s+\S*$/, '') + '…' : t);
+const dayShort = at => {
+  const d = new Date(at), day = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return d.getFullYear() === new Date().getFullYear() ? day : `${day}, ${d.getFullYear()}`;
 };
 // When a report from each page went in this tab, for the line under its button.
 let sent = {};
@@ -194,10 +217,18 @@ try { sent = JSON.parse(sessionStorage.getItem('placard.sent') || '{}'); } catch
 const clock = ms => { const d = new Date(ms); return `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${d.getHours() < 12 ? 'am' : 'pm'}`; };
 
 function reportButton(s, label) {
-  const done = sent[s?.id || ''];
+  const key = s?.id || '', done = sent[key], kept = draftOf(key);
+  const unsent = kept?.text ? h('div', { class: 'unsent' },
+    h('p', { class: 'msg wait' }, `Not sent yet: "${excerpt(kept.text)}"${kept.at ? ` (${dayShort(kept.at)})` : ''}.`),
+    h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn', onclick: async e => {
+      const b = e.currentTarget;
+      b.disabled = true; b.textContent = 'Sending…';
+      try { const emailed = await sendReport(s, kept); render(); sentToast(emailed); }
+      catch (err) { b.disabled = false; b.textContent = 'Send it now'; toast(failLine(err), 'bad'); }
+    } }, 'Send it now'))) : null;
   return [
     h('div', { class: 'btns stack' }, h('button', { type: 'button', class: 'btn ghost wide', onclick: () => report(s) }, label)),
-    done ? h('p', { class: 'msg ok sent' }, done.emailed ? `Sent to the owner at ${clock(done.at)}.` : `Saved for the owner at ${clock(done.at)}. If it's urgent, call.`) : null,
+    unsent || (done ? h('p', { class: 'msg ok sent' }, done.emailed ? `Sent to the owner at ${clock(done.at)}.` : `Saved for the owner at ${clock(done.at)}. If it's urgent, call.`) : null),
   ];
 }
 
@@ -238,26 +269,21 @@ function report(s) {
     if (!v.text) { say('Write what happened first.', 'bad'); return; }
     keepDraft(key, v);
     send.disabled = true; send.textContent = 'Sending…'; say(''); sms.hidden = true;
-    const doc = { ...v, website: trap.value, system: s?.id || '', systemName: s?.name || '' };
     try {
-      const j = demo ? ledger.demo.handle({ op: 'report', app: 'placard', coll: 'reports', doc })
-        : await publicReport(owner() ? ledger.cfg.url : LEDGER_URL, 'placard', 'reports', doc);
-      const emailed = j?.emailed !== false;  // a ledger script before 1.1 doesn't say: it always tried
-      keepDraft(key, null);
-      sent[key] = { at: Date.now(), emailed };
-      try { sessionStorage.setItem('placard.sent', JSON.stringify(sent)); } catch {}
+      const emailed = await sendReport(s, v, trap.value);
       if (dlg.open) dlg.close();
       render();
-      toast(emailed ? 'Sent. The owner gets it by email.' : 'Saved for the owner. If it\'s urgent, call.');
+      sentToast(emailed);
     } catch (err) {
       send.disabled = false; send.textContent = 'Send';
-      const line = /too many/.test(err.message) ? 'Too many reports this hour. Your message is kept: please call.' : 'Couldn\'t send it. Your message is kept: try again, or call.';
-      if (!dlg.open) { toast(line, 'bad'); return; }
+      const line = failLine(err);
+      if (!dlg.open) { toast(line, 'bad'); render(); return; }
       say(line, 'bad');
       if (tel) { sms.href = smsHref(); sms.hidden = false; }
     }
   });
-  dlg.addEventListener('close', () => setTimeout(() => dlg.remove(), 50));
+  // closed: the page behind says whether something typed there hasn't gone
+  dlg.addEventListener('close', () => { setTimeout(() => dlg.remove(), 50); render(); });
   dlg.append(h('h2', {}, 'Tell the owner'), form);
   document.body.append(dlg);
   dlg.showModal();

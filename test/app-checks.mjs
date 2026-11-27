@@ -205,6 +205,51 @@ export async function retryChecks({ browser, base, assert }) {
   } finally { await ctx.close(); }
 }
 
+// A report that couldn't go, once its form is closed: the page says it hasn't gone and when it was typed, across a
+// reload, and Send it now sends it once. Nothing sends it by itself.
+export async function draftChecks({ browser, base, assert }) {
+  const { ctx, L, errors, page } = await phone(browser, base);
+  const text = sel => page.locator(sel).evaluate(el => el.textContent.replace(/\s+/g, ' ').trim());
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], day = d => MON[d.getMonth()] + ' ' + d.getDate();
+  try {
+    await page.goto(base + '#water-heater');
+    await page.waitForSelector('.tape >> text=Water heater');
+    await page.click('text=Report a problem or log a visit');
+    await page.fill('dialog[open] #f-text', 'No hot water since the power cut this morning');
+    L.down = true;
+    await page.click('dialog[open] button[type=submit]');
+    await page.waitForSelector('dialog[open] .msg.bad');
+    await page.click('dialog[open] >> text=Cancel');
+    await page.waitForSelector('.unsent');
+    const line = `Not sent yet: "No hot water since the power cut this…" (${day(new Date())}).`;
+    assert.equal(await text('.unsent .msg'), line, 'nothing on the page says the report hasn\'t gone');
+    // the signal comes back while the page is open: nothing goes by itself
+    L.down = false;
+    await page.evaluate(() => dispatchEvent(new Event('online')));
+    await page.waitForTimeout(800);
+    assert.equal(L.reports.length, 0, 'a kept report went by itself');
+    // a reload a few days later: still there, with the day it was typed
+    const was = new Date(Date.now() - 4 * 86400000);
+    await page.evaluate(at => { const d = JSON.parse(localStorage.getItem('placard.draft')); d['water-heater'].at = at; localStorage.setItem('placard.draft', JSON.stringify(d)); }, was.getTime());
+    await page.reload();
+    await page.waitForSelector('.unsent');
+    assert.equal(await text('.unsent .msg'), `Not sent yet: "No hot water since the power cut this…" (${day(was)}).`);
+    assert.equal(await page.locator('.unsent').count(), 1, 'the line shows twice');
+    // Send it now: one report, and the line says it went
+    await page.click('.unsent >> text=Send it now');
+    await page.waitForSelector('.toast.show >> text=Sent. The owner gets it by email.');
+    assert.deepEqual(L.reports.map(r => [r.system, r.text, r.website]), [['water-heater', 'No hot water since the power cut this morning', '']]);
+    assert.equal(await page.locator('.unsent').count(), 0);
+    assert.match(await text('.sent'), /^Sent to the owner at \d{1,2}:\d\d [ap]m\.$/);
+    assert.equal(await page.evaluate(() => JSON.stringify(JSON.parse(localStorage.getItem('placard.draft') || '{}')['water-heater'] || null)), 'null');
+    // the front page has no line for another page's report
+    await page.goto(base + '#');
+    await page.waitForSelector('.urgent-tile');
+    assert.equal(await page.locator('.unsent').count(), 0);
+    assert.deepEqual(errors, [], 'errors with a kept report');
+  } finally { await ctx.close(); }
+}
+
 // The owner, connected (not the sample): the status line on every page, whether a save has reached tenants, and the
 // guide part that puts the ledger address in js/config.js.
 export async function ownerChecks({ browser, base, assert }) {
@@ -434,6 +479,7 @@ export async function appChecks({ page, ctx, base, assert }) {
   await oddRecordChecks({ browser: ctx.browser(), base, assert });
   await retryChecks({ browser: ctx.browser(), base, assert });
   await configChecks({ browser: ctx.browser(), base, assert });
+  await draftChecks({ browser: ctx.browser(), base, assert });
   // a tenant on an unpublished manual
   assert.match(await page.locator('#app').innerText(), /Not published yet/);
   // the sample house, as a tenant would see it after tapping a sticker
