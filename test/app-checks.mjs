@@ -2,7 +2,7 @@
 import { readFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SAMPLE } from '../js/starter.js';
+import { SAMPLE, STARTER } from '../js/starter.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const LEDGER = 'https://script.google.com/macros/s/AKfyTEST/exec';
@@ -397,8 +397,81 @@ export async function secondOwnerChecks({ browser, base, assert }) {
     await page.click('dialog[open] button[type=submit]');
     await page.waitForSelector('.toast.show >> text=Still loading from the ledger. Try again in a moment.');
     assert.deepEqual(L.puts.map(d => d.id), ['well-tank']);
+    // pages another device made come in while this one makes them: Make this page and Add a system leave them as they
+    // were, whether they arrive in the press's own catch-up or while the sheet is open
+    await page.evaluate(() => dispatchEvent(new Event('online')));
+    await page.waitForFunction(() => window.__placard.ledger.synced('site'));
+    const fan = { id: 'attic-fan', name: 'Attic fan', kind: 'other', where: 'Attic, by the hatch', summary: 'Pulls hot air out in summer.', steps: 'Switch on the hall wall.',
+      facts: [['Switch', 'Hall, by the closet']], order: 20 };
+    const bib = { id: 'hose-bib', name: 'Outside tap', kind: 'water', where: 'Back wall, by the deck', summary: 'Shut it off inside before the first frost.', order: 21 };
+    const septic = { ...STARTER.find(d => d.id === 'septic'), where: 'Front lawn, under the green lid', summary: 'Pumped every three years.' };
+    const unchanged = (d, what) => assert.deepEqual(L.site.find(x => x.id === d.id), d, what);
+    L.site.push(structuredClone(fan));
+    await page.goto(base + '#attic-fan');
+    await page.waitForSelector("text=This sticker's page isn't in the manual yet.");
+    L.delay = 1000;
+    await page.evaluate(() => { window.__placard.ledger.listedAt = 0; });   // the last list was a while ago: the press asks first
+    await page.click('text=Make this page');
+    await page.waitForSelector('dialog[open], .tape >> text=Attic fan');
+    const sheetUp = await page.locator('dialog[open]').count();
+    if (sheetUp) { await page.fill('dialog[open] #f-name', 'Typed'); await page.click('dialog[open] button[type=submit]'); }
+    await page.waitForTimeout(300);
+    await page.waitForFunction(() => /^(Saved|Up to date)$/.test(document.querySelector('.sync')?.textContent));
+    unchanged(fan, 'Make this page replaced the page another device made');
+    assert.equal(sheetUp, 0, 'Make this page opened a sheet for a page that had come in, instead of the page');
+    await page.waitForSelector('.tape >> text=Attic fan');
+    L.delay = 0;
+    await page.goto(base + '#hose-bib');
+    await page.waitForSelector("text=This sticker's page isn't in the manual yet.");
+    await page.click('text=Make this page');
+    await page.waitForSelector('dialog[open]');
+    await page.fill('dialog[open] #f-name', 'Typed');
+    L.site.push(structuredClone(bib));
+    await page.evaluate(() => dispatchEvent(new Event('online')));
+    await page.waitForFunction(() => !!window.__placard.ledger.doc('site', 'hose-bib'));
+    await page.click('dialog[open] button[type=submit]');
+    await page.waitForSelector('.toast.show >> text=That page is in the manual now. Open it to edit it.');
+    await page.waitForSelector('.tape >> text=Outside tap');
+    unchanged(bib, 'a page that came in while the sheet was open was saved over');
+    await page.goto(base + '#/owner');
+    await page.click('text=Add a system');
+    await page.waitForSelector('dialog[open]');
+    L.site.push(structuredClone(septic));
+    await page.evaluate(() => dispatchEvent(new Event('online')));
+    await page.waitForFunction(() => !!window.__placard.ledger.doc('site', 'septic'));
+    await page.selectOption('dialog[open] #f-pick', 'septic');
+    await page.click('dialog[open] button[type=submit]');
+    await page.waitForSelector('.toast.show >> text=That page is in the manual now.');
+    await page.waitForSelector('.tape >> text=Septic system');
+    await page.waitForFunction(() => /^(Saved|Up to date)$/.test(document.querySelector('.sync')?.textContent));
+    unchanged(septic, 'Add a system put the usual page over the one another device added');
+    assert.deepEqual(L.puts.map(d => d.id), ['well-tank']);
     assert.deepEqual(errors, [], 'errors on the second owner device');
   } finally { await ctx.close(); }
+  // no house page on the sheet yet: one comes in from another device while House and contact is open, and isn't replaced
+  {
+    const { ctx, L, errors, page } = await phone(browser, base, { published: false });
+    const hs = L.site.find(d => d.id === 'house');
+    L.site = L.site.filter(d => d.id !== 'house');
+    await ctx.addInitScript(u => { try { localStorage.getItem('placard.ledger') || localStorage.setItem('placard.ledger', JSON.stringify({ url: u, key: 'k'.repeat(40) })); } catch {} }, LEDGER);
+    try {
+      await page.goto(base + '#/owner');
+      await page.waitForFunction(() => document.querySelector('.sync')?.textContent === 'Up to date');
+      await page.click('text=House and contact');
+      await page.waitForSelector('dialog[open]');
+      await page.fill('dialog[open] #f-title', 'Typed');
+      L.site.push(structuredClone(hs));
+      await page.evaluate(() => dispatchEvent(new Event('online')));
+      await page.waitForFunction(() => !!window.__placard.ledger.doc('site', 'house'));
+      await page.click('dialog[open] button[type=submit]');
+      await page.waitForSelector('.toast.show >> text=The house page came in from the ledger. Open House and contact again.');
+      await page.waitForTimeout(300);
+      await page.waitForFunction(() => /^(Saved|Up to date)$/.test(document.querySelector('.sync')?.textContent));
+      assert.deepEqual(L.puts.map(d => d.id), [], 'the house page another device saved was replaced');
+      assert.deepEqual(L.site.find(d => d.id === 'house'), hs);
+      assert.deepEqual(errors, [], 'errors with a house page arriving');
+    } finally { await ctx.close(); }
+  }
 }
 
 // Records typed into the sheet by hand, or from an old import: two with no name and no order, one in a group that isn't

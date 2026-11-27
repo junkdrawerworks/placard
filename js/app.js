@@ -343,7 +343,7 @@ const tenantNotice = () => {
 };
 
 async function editSystem(s) {
-  const exists = !!(s && sys(s.id));
+  const exists = !!(s?._updated && sys(s.id));   // a sticker page's stub has no saved time: always a new page
   const v = await sheet({ title: exists ? 'Edit ' + s.name : 'New system', danger: exists ? 'Delete' : null, fields: [
     { name: 'name', label: 'Name', value: s?.name, required: true },
     { name: 'where', label: 'Where it is', value: s?.where, placeholder: 'Basement, left of the stairs' },
@@ -368,6 +368,8 @@ async function editSystem(s) {
   if (!exists && !ledger.synced('site')) { toast(STILL_LOADING, 'bad'); return; }
   if (s?.id && FRONT.has(s.id)) { toast(`"${s.id}" is the front page's own address: pick another.`, 'bad'); return; }
   const id = s?.id || uniqueId(v.name);
+  // the page came in from the ledger while the sheet was open (made on another device): it isn't saved over
+  if (!exists && sys(id)) { toast('That page is in the manual now. Open it to edit it.', 'bad'); fromLedger(); go('#' + id); render(); return; }
   if (!save({ ...(s || {}), id, name: v.name, where: v.where, kind: v.kind, emergency: v.emergency === 'yes', summary: v.summary, steps: v.steps,
     facts: parseFacts(v.facts), care: v.care, warn: v.warn, manual: v.manual, order: Number(v.order) || 99 })) return;
   saidSaved(id);
@@ -393,6 +395,8 @@ async function editHouse() {
   ] });
   if (!v || v.__danger) return;
   if (!site.some(d => d.id === 'house') && !ledger.synced('site')) { toast(STILL_LOADING, 'bad'); return; }
+  // there was no house page when the sheet opened, and one came in from the ledger since: it isn't saved over
+  if (!hs._updated && house()._updated) { toast('The house page came in from the ledger. Open House and contact again.', 'bad'); render(); return; }
   if (save({ ...hs, id: 'house', title: v.title, intro: v.intro, notes: v.notes, contact: { name: v.cname, phone: v.phone, email: v.email, note: v.cnote } })) saidSaved('house');
 }
 
@@ -405,6 +409,8 @@ async function addFromStarter() {
   if (!v || !v.pick) return;
   if (v.pick === '__new') return editSystem(null);
   if (!ledger.synced('site')) { toast(STILL_LOADING, 'bad'); return; }
+  // another device added it while the list was open: its page stays as it is
+  if (sys(v.pick)) { toast('That page is in the manual now.', 'bad'); fromLedger(); go('#' + v.pick); return; }
   save({ ...STARTER.find(s => s.id === v.pick) });
   go('#' + v.pick);
 }
@@ -499,7 +505,7 @@ function renderNotFound(id, badId) {
   return [
     h('p', { class: 'crumb' }, h('a', { href: '#' }, '‹ ' + (hs.title || 'House manual'))),
     h('p', { class: 'empty' }, badId ? `"${id}" can't be a page's id: letters, digits and dashes only.` : 'This sticker\'s page isn\'t in the manual yet.'),
-    owner() && !badId && !FRONT.has(id) ? h('div', { class: 'btns' }, h('button', { class: 'btn', type: 'button', onclick: fresh(() => editSystem({ id, name: '' })) }, 'Make this page')) : null,
+    owner() && !badId && !FRONT.has(id) ? h('div', { class: 'btns' }, h('button', { class: 'btn', type: 'button', onclick: fresh(() => sys(id) ? render() : editSystem({ id, name: '' })) }, 'Make this page')) : null,
     contactCard(hs.contact),
     reportButton({ id, name: '' }, 'Report a problem'),   // the report names the sticker, so the owner knows which
     h('div', { class: 'btns stack' }, h('a', { class: 'btn ghost wide', href: '#' }, 'The whole house manual')),
