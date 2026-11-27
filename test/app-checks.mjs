@@ -252,10 +252,49 @@ export async function secondOwnerChecks({ browser, base, assert }) {
   } finally { await ctx.close(); }
 }
 
+// Records typed into the sheet by hand, or from an old import: two with no name and no order, one in a group that isn't
+// one of the six, one whose details aren't a list. The tenant's front page and the owner's list still draw, each page
+// is listed (an odd group under Everything else), and editing the odd group's page keeps its group.
+const ODD = [{ id: 'attic', where: 'Hall closet hatch' }, { id: 'crawl-space', where: 'Under the porch' },
+  { id: 'boiler', name: 'Boiler', kind: 'heating', order: 16, where: 'Basement', summary: 'Heats the radiators.' }, { id: 'shed', name: 'Shed', facts: 'Lock: blue', order: '7' }];
+export async function oddRecordChecks({ browser, base, assert }) {
+  for (const who of ['tenant', 'owner']) {
+    const { ctx, L, errors, page } = await phone(browser, base, { published: who === 'tenant' });
+    L.site.push(...structuredClone(ODD));
+    if (who === 'owner') await ctx.addInitScript(u => localStorage.setItem('placard.ledger', JSON.stringify({ url: u, key: 'k'.repeat(40) })), LEDGER);
+    const rows = () => page.locator('.list .row .t').allTextContents();
+    try {
+      await page.goto(base + (who === 'owner' ? '#/owner' : ''));
+      await page.waitForSelector('.list .row', { timeout: 8000 });
+      const all = await rows();
+      for (const name of ['Attic', 'Crawl space', 'Boiler', 'Shed', 'Water heater']) assert.ok(all.includes(name), `${who}: "${name}" isn't listed (${all.join(', ')})`);
+      if (who === 'tenant') {
+        const other = await page.locator('section', { has: page.locator('h2', { hasText: 'Everything else' }) }).locator('.row .t').allTextContents();
+        assert.deepEqual(other.sort(), ['Attic', 'Boiler', 'Crawl space', 'Shed'], 'a page in a group Placard doesn\'t know isn\'t listed');
+        await page.goto(base + '#attic');
+        await page.waitForSelector('.tape >> text=Attic');
+        await page.goto(base + '#shed');
+        await page.waitForSelector('.tape >> text=Shed');
+      } else {
+        await page.goto(base + '#boiler');
+        await page.click('text=Edit this page');
+        assert.equal(await page.locator('#f-kind').evaluate(s => s.value), 'heating', 'Edit shows another group for the page');
+        await page.fill('#f-where', 'Basement, back corner');
+        await page.click('dialog[open] button[type=submit]');
+        await page.waitForSelector('.where >> text=back corner');
+        await page.waitForFunction(() => /^(Saved|Up to date)$/.test(document.querySelector('.sync')?.textContent));
+        assert.deepEqual([L.puts.at(-1).id, L.puts.at(-1).kind], ['boiler', 'heating'], 'a Where change saved the page in another group');
+      }
+      assert.deepEqual(errors, [], `errors with odd records (${who})`);
+    } finally { await ctx.close(); }
+  }
+}
+
 export async function appChecks({ page, ctx, base, assert }) {
   await tenantChecks({ browser: ctx.browser(), base, assert });
   await ownerChecks({ browser: ctx.browser(), base, assert });
   await secondOwnerChecks({ browser: ctx.browser(), base, assert });
+  await oddRecordChecks({ browser: ctx.browser(), base, assert });
   // a tenant on an unpublished manual
   assert.match(await page.locator('#app').innerText(), /Not published yet/);
   // the sample house, as a tenant would see it after tapping a sticker

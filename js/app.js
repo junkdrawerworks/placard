@@ -24,26 +24,44 @@ const jset = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } cat
 // ids are never a system's page.
 const FRONT = new Set(['house', 'home']);
 const house = () => site.find(d => d.id === 'house') || { title: 'House manual' };
-const systems = () => site.filter(d => !FRONT.has(d.id)).sort((a, b) => (a.order ?? 99) - (b.order ?? 99) || a.name.localeCompare(b.name));
+const systems = () => site.filter(d => !FRONT.has(d.id)).sort((a, b) => a.order - b.order || String(a.name).localeCompare(String(b.name)));
 const sys = id => FRONT.has(id) ? null : site.find(d => d.id === id);
+// The pages as the screens use them. A record typed into the sheet by hand, or from an old import, can lack a name or an
+// order, have details that aren't a list, or a group that isn't one of the six: each page still draws and is listed
+// (a page without a name goes by its id, 'crawl-space' as 'Crawl space'; an unknown group under Everything else, and
+// kept as it is when the page is saved). A row whose JSON didn't read never reaches the screens.
+const str = v => (v == null ? '' : typeof v === 'string' ? v : String(v));
+const group = s => (KINDS.some(([k]) => k === s.kind) ? s.kind : 'other');
+function normal(d) {
+  if (d.id === 'house') {
+    const c = d.contact && typeof d.contact === 'object' && !Array.isArray(d.contact) ? d.contact : null;
+    return c ? { ...d, contact: { name: str(c.name), phone: str(c.phone), email: str(c.email), note: str(c.note) } } : d;
+  }
+  const named = typeof d.name === 'string' && d.name.trim() ? d.name : '';
+  return { ...d, name: named || (d.id.charAt(0).toUpperCase() + d.id.slice(1)).replace(/-/g, ' '),
+    facts: Array.isArray(d.facts) ? d.facts.filter(Array.isArray).map(([k, v]) => [str(k), str(v)]) : [],
+    order: Number.isFinite(Number(d.order)) && d.order !== '' && d.order != null ? Number(d.order) : 99 };
+}
+const pages = docs => (Array.isArray(docs) ? docs : []).filter(d => d && typeof d === 'object' && typeof d.id === 'string' && d.id && !d._bad && !d._deleted).map(normal);
+const fromLedger = () => { site = pages(ledger.docs('site')); };
 // A new page (or the house page, the first time) waits until this phone has heard from the ledger: before that its
 // copy can't say which pages are there, and a save would replace the page in the sheet. It asks for the latest first.
-const fresh = then => e => held(e.currentTarget, ledger.catchUp(['site'])).then(() => { site = ledger.docs('site'); return then(); });
+const fresh = then => e => held(e.currentTarget, ledger.catchUp(['site'])).then(() => { fromLedger(); return then(); });
 
 async function load() {
   if (owner()) {
-    site = ledger.docs('site');
+    fromLedger();
     render();
-    ledger.keepUp(['site', 'reports'], () => { site = ledger.docs('site'); render(); });
+    ledger.keepUp(['site', 'reports'], () => { fromLedger(); render(); });
     return;
   } else {
-    site = jget('placard.public') || [];
+    site = pages(jget('placard.public'));
     if (!LEDGER_URL) { siteError = 'unset'; }
     else {
       // The copy kept from last time straight away; with none, a line while Google wakes the script (a few seconds).
       loading = !site.length;
       render();
-      try { site = await publicRead(LEDGER_URL, 'placard', 'site'); jset('placard.public', site); siteError = ''; }
+      try { const docs = await publicRead(LEDGER_URL, 'placard', 'site'); site = pages(docs); jset('placard.public', docs); siteError = ''; }
       catch (e) { siteError = site.length ? '' : 'offline'; }
       loading = false;
     }
@@ -76,7 +94,7 @@ function renderHome() {
     contactCard(hs.contact),
     reportButton(null, 'Report a problem'),
     KINDS.map(([k, label]) => {
-      const in_ = list.filter(s => (s.kind || 'other') === k);
+      const in_ = list.filter(s => group(s) === k);
       return in_.length ? h('section', {}, h('h2', {}, label), h('ul', { class: 'list' }, in_.map(s =>
         h('li', {}, h('a', { class: 'row', href: '#' + s.id }, h('span', { class: 'main' }, h('span', { class: 't' }, s.name), s.where ? h('span', { class: 's' }, s.where) : null), h('span', { class: 'meta' }, '›')))))) : null;
     }),
@@ -90,7 +108,7 @@ function renderSystem(s) {
   const steps = lines(s.steps);
   return [
     h('p', { class: 'crumb' }, h('a', { href: '#' }, '‹ ' + (hs.title || 'House manual'))),
-    h('div', { class: 'tape-wrap' }, h('span', { class: 'tape-cap' }, (KINDS.find(k => k[0] === s.kind) || KINDS[5])[1]), h('div', { class: 'tape' }, s.name)),
+    h('div', { class: 'tape-wrap' }, h('span', { class: 'tape-cap' }, KINDS.find(k => k[0] === group(s))[1]), h('div', { class: 'tape' }, s.name)),
     s.where ? h('p', { class: 'where' }, h('b', {}, 'Where: '), s.where) : null,
     s.summary ? h('p', { class: 'lead' }, s.summary) : null,
     s.warn ? h('div', { class: 'notice warn' }, h('p', {}, s.warn)) : null,
@@ -208,7 +226,7 @@ function save(doc) {
     toast(e.refused === 'too big' ? 'Too long to save: over 45,000 characters. Shorten it, or link the manual instead.' : `"${doc.id}" can't be a page's id: letters, digits and dashes only.`, 'bad');
     return false;
   }
-  site = ledger.docs('site'); render(); return true;
+  fromLedger(); render(); return true;
 }
 // After a save: tenants see it only once it has reached the sheet, so say which. (A send already on its way when the
 // save was made can come back first; the save goes in the next one.)
@@ -222,7 +240,8 @@ async function editSystem(s) {
   const v = await sheet({ title: exists ? 'Edit ' + s.name : 'New system', danger: exists ? 'Delete' : null, fields: [
     { name: 'name', label: 'Name', value: s?.name, required: true },
     { name: 'where', label: 'Where it is', value: s?.where, placeholder: 'Basement, left of the stairs' },
-    { name: 'kind', label: 'Group', type: 'select', value: s?.kind || 'other', options: KINDS },
+    { name: 'kind', label: 'Group', type: 'select', value: s?.kind || 'other',
+      options: s?.kind && group(s) !== s.kind ? [...KINDS, [s.kind, `${s.kind} (shown under Everything else)`]] : KINDS },
     { name: 'emergency', label: 'Show under "In an emergency"', type: 'select', value: s?.emergency ? 'yes' : 'no', options: [['no', 'No'], ['yes', 'Yes']] },
     { name: 'summary', label: 'What it is', type: 'textarea', value: s?.summary },
     { name: 'steps', label: 'What to do (one step per line)', type: 'textarea', rows: 4, value: s?.steps },
@@ -235,7 +254,7 @@ async function editSystem(s) {
   if (!v) return;
   if (v.__danger) {
     if (await confirmSheet('Delete ' + s.name + '?', 'Its page goes. A sticker already written for it will open "not found" until you add a system with the same id.', 'Delete')) {
-      ledger.del('site', s.id); site = ledger.docs('site'); go('#/owner');
+      ledger.del('site', s.id); fromLedger(); go('#/owner');
     }
     return;
   }
@@ -299,7 +318,7 @@ function importFacts() {
       merged = mergeImport(docs, id => ledger.doc('site', id), id => ledger.gone('site', id));
     } catch { toast('That file isn\'t a Placard import.', 'bad'); return; }
     for (const doc of merged.puts) ledger.put('site', doc);
-    site = ledger.docs('site'); render();
+    fromLedger(); render();
     toast(importSummary(merged.res, ['page', 'pages']), merged.res.skipped.length ? 'bad' : '');
   });
   input.click();
