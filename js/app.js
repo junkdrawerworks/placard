@@ -1,6 +1,6 @@
 // Placard: a house manual on stickers. Tenants tap a sticker and get that system's page with no app and no sign-in;
 // the owner, connected to the ledger, edits the pages, writes and locks the stickers and reads the reports.
-import { $, h, mount, toast, sheet, confirmSheet, route, go, stampText, qrSvg, today, held, sampleLink } from './kit/ui.js';
+import { $, h, mount, toast, sheet, confirmSheet, route, go, stampText, qrSvg, today, held, sampleLink, onRoute } from './kit/ui.js';
 import { Ledger, watchConnectLinks, publicRead, publicReport, refusal, importSummary, STILL_LOADING } from './kit/ledger.js';
 import { tagUrl } from './kit/tags.js';
 import { nfcPanel } from './kit/panel.js';
@@ -563,7 +563,7 @@ function render() {
   if (demo) { $('#demo-note').hidden = false; if (!$('#demo-note .sample-out')) $('#demo-note p').append(' ', sampleLink()); }
 }
 
-window.addEventListener('hashchange', () => { render(); scrollTo(0, 0); });
+onRoute(render);
 ledger.on(() => { const st = $('.sync'); if (st) { st.className = 'sync ' + ledger.state; st.textContent = ledger.statusText(); } });
 load();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});

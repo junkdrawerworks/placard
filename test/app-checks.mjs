@@ -645,6 +645,10 @@ export async function appChecks({ page, ctx, base, assert }) {
   await configChecks({ browser: ctx.browser(), base, assert });
   await draftChecks({ browser: ctx.browser(), base, assert });
   await keyboardChecks({ browser: ctx.browser(), base, assert });
+  // Back from a page 40 rows down the owner's front page lands where the list was
+  const { backKeepsPlace } = await import('./kit-checks.mjs');
+  await backKeepsPlace({ browser: ctx.browser(), base, assert, app: 'placard', colls: { reports: [],
+    site: [{ id: 'house', title: 'House manual' }, ...Array.from({ length: 50 }, (_, i) => ({ id: `system-${i + 1}`, name: `System ${i + 1}`, kind: 'other', where: 'Basement', order: i + 1 }))] } });
   // a tenant on an unpublished manual
   assert.match(await page.locator('#app').innerText(), /Not published yet/);
   // the sample house, as a tenant would see it after tapping a sticker
