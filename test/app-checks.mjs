@@ -16,14 +16,15 @@ const fakeNfc = () => {
 };
 // A phone on a published manual: js/config.js as served carries a ledger address (published: true), and a pretend
 // ledger answers it with the sample house. L.down: every request fails; L.delay: each waits that long (Google waking
-// the script); L.hang: Google takes each request and never answers (one bar); L.emailed: what a report's answer says. The service worker is off, so every request reaches the routes.
+// the script); L.hang: Google takes each request and never answers (one bar); L.emailed: what a report's answer says;
+// L.dropPub: how many of the next tenant reads (pub) drop their connection. The service worker is off, so every request reaches the routes.
 // published: the address put in js/config.js (true: LEDGER). OTHER is another deployment that answers with the same
 // pages; any other script.google.com address answers 404, as a mistyped or archived one does.
 const OTHER = 'https://script.google.com/macros/s/AKfyOTHER/exec';
 async function phone(browser, base, { published = true, dark = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true,
     colorScheme: dark ? 'dark' : 'light', serviceWorkers: 'block' });
-  const L = { down: false, delay: 0, hang: false, held: [], emailed: true, reports: [], puts: [], site: structuredClone(SAMPLE['placard.site']) };
+  const L = { down: false, delay: 0, hang: false, held: [], emailed: true, dropPub: 0, reports: [], puts: [], site: structuredClone(SAMPLE['placard.site']) };
   if (published) await ctx.route(base + 'js/config.js', async r => r.fulfill({ contentType: 'text/javascript',
     body: (await readFile(join(root, 'js/config.js'), 'utf8')).replace("LEDGER_URL = ''", `LEDGER_URL = '${published === true ? LEDGER : published}'`) }));
   await ctx.route('https://script.google.com/**', async r => {
@@ -32,6 +33,7 @@ async function phone(browser, base, { published = true, dark = false } = {}) {
     if (L.down) return r.abort('internetdisconnected');
     const req = r.request(), json = o => r.fulfill({ contentType: 'application/json', body: JSON.stringify(o) });
     if (!req.url().startsWith(LEDGER) && !req.url().startsWith(OTHER)) return r.fulfill({ status: 404, contentType: 'text/html', body: '<!DOCTYPE html><title>Page Not Found</title>' });
+    if (req.method() === 'GET' && L.dropPub > 0 && new URL(req.url()).searchParams.get('op') === 'pub') { L.dropPub--; return r.abort('connectionreset'); }
     if (req.method() === 'GET') return json(new URL(req.url()).searchParams.get('op') === 'pub' ? { ok: true, docs: L.site } : { ok: true, app: 'switchboard-ledger', version: '1.1' });
     const b = JSON.parse(req.postData() || '{}');
     if (b.op === 'report') { L.reports.push(b.doc); return json({ ok: true, emailed: L.emailed }); }
@@ -377,6 +379,28 @@ export async function configChecks({ browser, base, assert }) {
       assert.deepEqual(errors, [], 'errors on the owner pages');
     } finally { await ctx.close(); }
   }
+  // js/config.js has this phone's own address and its ledger answers, but one tenant read drops on a poor line (a
+  // basement): this phone's own line, not the address, so no notice, and a save never says tenants can't open it
+  const { ctx, L, errors, page } = await phone(browser, base);
+  await ctx.addInitScript(u => localStorage.setItem('placard.ledger', JSON.stringify({ url: u, key: 'k'.repeat(40) })), LEDGER);
+  try {
+    L.dropPub = 2;
+    await page.goto(base + '#/owner');
+    await page.waitForFunction(() => document.querySelector('.sync')?.textContent === 'Up to date');
+    await page.waitForFunction(() => document.querySelector('.list .row'));
+    for (let i = 0; i < 20 && L.dropPub > 1; i++) await page.waitForTimeout(100);
+    await page.waitForTimeout(300);
+    assert.equal(L.dropPub, 1, 'the Edit screen didn\'t read the manual as a tenant would');
+    assert.equal(await page.locator('#app .notice').count(), 0, 'one dropped read said tenants can\'t open the manual');
+    await page.goto(base + '#water-heater');
+    await page.click('text=Edit this page');
+    await page.fill('#f-where', 'Basement, under the stairs.');
+    await page.click('dialog >> button[type=submit]');
+    await page.waitForSelector('#toast.show');
+    assert.equal(await page.locator('#toast').textContent(), 'Saved.', 'a dropped read after a save said tenants can\'t open the manual');
+    assert.equal(L.dropPub, 0);
+    assert.deepEqual(errors, [], 'errors on the owner pages');
+  } finally { await ctx.close(); }
 }
 
 // A second owner device (the laptop), connected while Google takes 3 s to answer its first list: Add a system, House

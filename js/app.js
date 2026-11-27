@@ -329,12 +329,15 @@ async function saidSaved(id) {
 
 // What tenants get: the owner's phone reads LEDGER_URL as a tenant's would (no key), once each time the Edit screen
 // opens and after a save. 'ok', 'other' (it answers, but isn't this phone's ledger address), 'failed' (it didn't
-// answer: a mistyped address, or a deployment archived or not set to Anyone), or '' (couldn't tell: no signal here).
+// answer: a mistyped address, or a deployment archived or not set to Anyone), or '' (couldn't tell: no signal here, or
+// a read of this phone's own address that failed).
 let tenants = '';
 async function checkTenants() {
   if (demo || !LEDGER_URL) return '';
   try { await publicRead(LEDGER_URL, 'placard', 'site'); tenants = LEDGER_URL.trim() === ledger.cfg.url ? 'ok' : 'other'; }
-  catch (e) { tenants = !navigator.onLine || e.kind === 'offline' || ledger.state === 'offline' ? '' : 'failed'; }
+  // config.js holding this phone's own address, which this phone's ledger answers on: tenants can reach it, so a read
+  // that failed is this phone's line (one bar, a dropped connection), not the address
+  catch (e) { tenants = LEDGER_URL.trim() === ledger.cfg.url || !navigator.onLine || e.kind === 'offline' || ledger.state === 'offline' ? '' : 'failed'; }
   if (route().view === 'owner') render();
   return tenants;
 }
