@@ -32,6 +32,10 @@ test('phone numbers and https links in a page\'s text are marked, and nothing el
     'Heater 120-1500 W', 'Tank 80 gal (303-1100 lb full)', 'Elevation 750.1234 ft'])
     assert.deepEqual(links(t), [], t);
   assert.deepEqual(links('Call 555-0142 in an emergency.'), [['555-0142', 'tel:5550142']], 'a number before "in" isn\'t a link');
+  // a unit rules out only the short form's ranges: "A/C" after a number isn't amps, and a whole number is never a range
+  assert.deepEqual(links('Acme Cooling 555-0123 A/C repair'), [['555-0123', 'tel:5550123']], '"A/C" after a number read as amps');
+  assert.deepEqual(links('Call 800-555-0100 A/C and heat'), [['800-555-0100', 'tel:8005550100']], 'a whole number before "A/C" isn\'t a link');
+  assert.deepEqual(links('Panel 100-2000 A main'), [], 'a range in amps');
   // nothing in the sample house is a link: its models, sizes, breakers and years stay text
   for (const d of SAMPLE['placard.site']) for (const v of [d.where, d.summary, d.steps, d.care, d.warn, d.notes, ...(d.facts || []).flat()])
     assert.deepEqual(links(v), [], v);

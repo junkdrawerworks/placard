@@ -46,9 +46,10 @@ export { lines };   // the kit's: one entry per line, typed numbering and bullet
 // Text with its links and phone numbers marked, for a page to make them tappable: [{ text }, { text, href }, …].
 // A phone number is 3-3-4 digits (dashes, dots or spaces between, the area code may be in brackets) or 3-4 with a dash
 // ("555-0142"), on its own: never part of a longer run of digits or letters, so a model number, a serial, a filter
-// size ("16 × 25 × 1"), a decimal ("750.1234 ft") or a year stays text, and never followed by a unit, so a range
-// ("120-1500 W", "303-1100 lb") does too. Only https links, without the full stop or bracket after them.
-const LINK = /https:\/\/[^\s<>"]+|(?<![\w+.\-/])(?:\+?1[ .-])?(?:(?:\(\d{3}\) ?|\d{3}[ .-])\d{3}[ .-]|\d{3}-)\d{4}(?![\w-]|[.,]\d)(?!\s?(?:k?W|V|A|lbs?|ft|gal|psi|mm|cm|kg|g|oz|cfm|BTU|°|%)(?![A-Za-z]))/g;
+// size ("16 × 25 × 1"), a decimal ("750.1234 ft") or a year stays text. The short form is never followed by a unit, so a
+// range ("120-1500 W", "303-1100 lb") does too; "A/C" after a number isn't amps. Only https links, without the full stop
+// or bracket after them.
+const LINK = /https:\/\/[^\s<>"]+|(?<![\w+.\-/])(?:\+?1[ .-])?(?:(?:\(\d{3}\) ?|\d{3}[ .-])\d{3}[ .-]\d{4}|\d{3}-\d{4}(?!\s?(?:k?W|V|A|lbs?|ft|gal|psi|mm|cm|kg|g|oz|cfm|BTU|°|%)(?![A-Za-z/])))(?![\w-]|[.,]\d)/g;
 export function splitLinks(text) {
   const out = [], s = String(text ?? '');
   let at = 0;
