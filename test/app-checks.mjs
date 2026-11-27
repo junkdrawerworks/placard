@@ -527,6 +527,9 @@ export async function appChecks({ page, ctx, base, assert }) {
   await page.evaluate(() => { location.hash = '#smoke-co'; });
   await page.click('text=Edit this page');
   await page.click('dialog[open] >> text=Delete');
+  // the confirmation says what a tenant tapping its sticker gets then, without ids
+  assert.equal(await page.locator('dialog[open] form > p').textContent(),
+    'Its page goes. A sticker written for it will open a page saying it isn\'t in the manual yet, with Who to call and the whole manual.');
   await page.click('dialog[open] button[type=submit]');
   await page.waitForSelector('h2 >> text=Edit the manual');
   const file = { docs: [{ id: 'house', title: 'House manual', intro: '', contact: { name: '', phone: '', email: '', note: '' }, notes: '' },
