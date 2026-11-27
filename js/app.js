@@ -64,6 +64,7 @@ function renderHome() {
     urgent.length ? h('section', {}, h('h2', {}, 'In an emergency'),
       h('div', { class: 'urgent' }, urgent.map(s => h('a', { class: 'urgent-tile', href: '#' + s.id }, h('b', {}, s.name), h('span', {}, s.where || ''))))) : null,
     contactCard(hs.contact),
+    reportButton(null, 'Report a problem'),
     KINDS.map(([k, label]) => {
       const in_ = list.filter(s => (s.kind || 'other') === k);
       return in_.length ? h('section', {}, h('h2', {}, label), h('ul', { class: 'list' }, in_.map(s =>
@@ -88,26 +89,94 @@ function renderSystem(s) {
     s.care ? h('section', {}, h('h2', {}, 'Looking after it'), lines(s.care).map(l => h('p', {}, l))) : null,
     s.manual ? h('p', {}, h('a', { class: 'btn ghost', href: s.manual, target: '_blank', rel: 'noopener' }, 'The manual')) : null,
     contactCard(hs.contact),
-    h('div', { class: 'btns stack' }, h('button', { type: 'button', class: 'btn ghost wide', onclick: () => report(s) }, 'Report a problem or log a visit')),
+    reportButton(s, 'Report a problem or log a visit'),
     owner() ? ownerTools(s) : null,
   ];
 }
 
-async function report(s) {
-  const v = await sheet({ title: 'Tell the owner', ok: 'Send', fields: [
-    { name: 'kind', label: 'This is', type: 'select', options: ['Problem', 'Service visit', 'Question'] },
-    { name: 'text', label: 'What happened', type: 'textarea', rows: 4, required: true, placeholder: s ? `About the ${s.name.toLowerCase()}…` : '' },
-    { name: 'name', label: 'Your name' },
-    { name: 'contact', label: 'Phone or email', hint: 'So we can get back to you.' },
-  ] });
-  if (!v || v.__danger) return;
-  if (!v.text) { toast('Write what happened first.', 'bad'); return; }
-  const doc = { ...v, system: s?.id || '', systemName: s?.name || '' };
-  try {
-    if (demo) ledger.demo.handle({ op: 'report', app: 'placard', coll: 'reports', doc });
-    else await publicReport(owner() ? ledger.cfg.url : LEDGER_URL, 'placard', 'reports', doc);
-    toast('Sent. The owner gets it by email.');
-  } catch (e) { toast(/too many/.test(e.message) ? 'Too many reports this hour. Please call instead.' : 'Couldn\'t send it. Check the signal, or call.', 'bad'); }
+// The report form. A report typed on one bar in a basement must not be lost: what's typed stays on the phone
+// (placard.draft, one per page) until a send works, and the form opens with it next time. Send waits for the answer;
+// if it fails the form stays open with the text, says so, and offers a text message to the house contact instead.
+const DRAFTS = 'placard.draft';
+const draftOf = key => (jget(DRAFTS) || {})[key] || null;
+const keepDraft = (key, v) => {
+  const all = jget(DRAFTS) || {};
+  if (v && (v.text || v.name || v.contact)) all[key] = v; else delete all[key];
+  jset(DRAFTS, all);
+};
+// When a report from each page went in this tab, for the line under its button.
+let sent = {};
+try { sent = JSON.parse(sessionStorage.getItem('placard.sent') || '{}'); } catch {}
+const clock = ms => { const d = new Date(ms); return `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${d.getHours() < 12 ? 'am' : 'pm'}`; };
+const dial = phone => String(phone || '').replace(/[^\d+]/g, '');
+
+function reportButton(s, label) {
+  const done = sent[s?.id || ''];
+  return [
+    h('div', { class: 'btns stack' }, h('button', { type: 'button', class: 'btn ghost wide', onclick: () => report(s) }, label)),
+    done ? h('p', { class: 'msg ok sent' }, done.emailed ? `Sent to the owner at ${clock(done.at)}.` : `Saved for the owner at ${clock(done.at)}. If it's urgent, call.`) : null,
+  ];
+}
+
+function report(s) {
+  const key = s?.id || '', c = house().contact || {}, tel = dial(c.phone), was = draftOf(key) || {};
+  const field = (name, label, input, hint) => h('label', { class: 'field', for: 'f-' + name }, h('span', {}, label), input, hint ? h('small', {}, hint) : null);
+  const kind = h('select', { id: 'f-kind', name: 'kind' }, ['Problem', 'Service visit', 'Question'].map(o => h('option', { value: o, selected: o === was.kind }, o)));
+  const text = h('textarea', { id: 'f-text', name: 'text', rows: 4, required: true, placeholder: s?.name ? `About the ${s.name.toLowerCase()}…` : '' });
+  const name = h('input', { id: 'f-name', name: 'name', type: 'text', autocomplete: 'off' });
+  const contact = h('input', { id: 'f-contact', name: 'contact', type: 'text', autocomplete: 'off' });
+  // The field only robots fill in: off the screen, out of the tab order and never autofilled. The ledger drops any
+  // report that has it.
+  const trap = h('input', { id: 'f-website', name: 'website', type: 'text', tabindex: '-1', autocomplete: 'off' });
+  text.value = was.text || ''; name.value = was.name || ''; contact.value = was.contact || '';
+  const values = () => ({ kind: kind.value, text: text.value.trim(), name: name.value.trim(), contact: contact.value.trim() });
+  const msg = h('p', { class: 'msg', 'aria-live': 'polite' });
+  const sms = h('a', { class: 'btn ghost wide sms', hidden: true }, 'Text it instead');
+  const smsHref = () => `sms:${tel}?body=${encodeURIComponent([s?.name, values().text].filter(Boolean).join(': ') + (values().name ? ` (${values().name})` : ''))}`;
+  const send = h('button', { type: 'submit', class: 'btn' }, 'Send');
+  const dlg = h('dialog', { class: 'sheet' });
+  const form = h('form', { method: 'dialog' },
+    tel ? h('p', { class: 'notice warn call-now' }, 'Urgent? ', h('a', { href: 'tel:' + tel }, `Call ${c.phone} now`), '.') : null,
+    field('kind', 'This is', kind),
+    field('text', 'What happened', text),
+    field('name', 'Your name', name),
+    field('contact', 'Phone or email', contact, 'So we can get back to you.'),
+    h('div', { class: 'trap', 'aria-hidden': 'true' }, h('label', { for: 'f-website' }, 'Leave this empty'), trap),
+    msg, sms,
+    h('div', { class: 'sheet-bar' }, h('span', { class: 'grow' }),
+      h('button', { type: 'button', class: 'btn ghost', onclick: () => dlg.close() }, 'Cancel'), send));
+  const say = (line, kind = '') => { msg.textContent = line; msg.className = 'msg ' + kind; };
+  form.addEventListener('input', () => { keepDraft(key, values()); if (!sms.hidden) sms.href = smsHref(); });
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const v = values();
+    if (!v.text) { say('Write what happened first.', 'bad'); return; }
+    keepDraft(key, v);
+    send.disabled = true; send.textContent = 'Sending…'; say(''); sms.hidden = true;
+    const doc = { ...v, website: trap.value, system: s?.id || '', systemName: s?.name || '' };
+    try {
+      const j = demo ? ledger.demo.handle({ op: 'report', app: 'placard', coll: 'reports', doc })
+        : await publicReport(owner() ? ledger.cfg.url : LEDGER_URL, 'placard', 'reports', doc);
+      const emailed = j?.emailed !== false;  // a ledger script before 1.1 doesn't say: it always tried
+      keepDraft(key, null);
+      sent[key] = { at: Date.now(), emailed };
+      try { sessionStorage.setItem('placard.sent', JSON.stringify(sent)); } catch {}
+      if (dlg.open) dlg.close();
+      render();
+      toast(emailed ? 'Sent. The owner gets it by email.' : 'Saved for the owner. If it\'s urgent, call.');
+    } catch (err) {
+      send.disabled = false; send.textContent = 'Send';
+      const line = /too many/.test(err.message) ? 'Too many reports this hour. Your message is kept: please call.' : 'Couldn\'t send it. Your message is kept: try again, or call.';
+      if (!dlg.open) { toast(line, 'bad'); return; }
+      say(line, 'bad');
+      if (tel) { sms.href = smsHref(); sms.hidden = false; }
+    }
+  });
+  dlg.addEventListener('close', () => setTimeout(() => dlg.remove(), 50));
+  dlg.append(h('h2', {}, 'Tell the owner'), form);
+  document.body.append(dlg);
+  dlg.showModal();
+  if (!matchMedia('(pointer: coarse)').matches) kind.focus();
 }
 
 // ---------------------------------------------------------------- owner
@@ -257,6 +326,20 @@ function renderReports() {
   ];
 }
 
+// A sticker whose page isn't in the manual (deleted, or never made): who to call, the report form and the front page
+// still help a tenant. The owner can make the page.
+function renderNotFound(id, badId) {
+  const hs = house();
+  return [
+    h('p', { class: 'crumb' }, h('a', { href: '#' }, '‹ ' + (hs.title || 'House manual'))),
+    h('p', { class: 'empty' }, badId ? `"${id}" can't be a page's id: letters, digits and dashes only.` : 'This sticker\'s page isn\'t in the manual yet.'),
+    owner() && !badId ? h('div', { class: 'btns' }, h('button', { class: 'btn', type: 'button', onclick: () => editSystem({ id, name: '' }) }, 'Make this page')) : null,
+    contactCard(hs.contact),
+    reportButton({ id, name: '' }, 'Report a problem'),   // the report names the sticker, so the owner knows which
+    h('div', { class: 'btns stack' }, h('a', { class: 'btn ghost wide', href: '#' }, 'The whole house manual')),
+  ];
+}
+
 // ---------------------------------------------------------------- frame
 function render() {
   const r = route();
@@ -269,7 +352,7 @@ function render() {
   else if (r.view === 'reports' && owner()) body = renderReports();
   else if (r.view === 'item') {
     const s = sys(r.id), wait = owner() ? ledger.notReady('site') : site.length ? '' : 'Loading…', badId = owner() && refusal({ id: r.id });
-    body = s ? renderSystem(s) : [h('p', { class: 'crumb' }, h('a', { href: '#' }, '‹ House manual')), h('p', { class: 'empty' }, wait || (badId ? `"${r.id}" can't be a page's id: letters, digits and dashes only.` : 'This sticker\'s page isn\'t in the manual yet.')), owner() && !wait && !badId ? h('div', { class: 'btns' }, h('button', { class: 'btn', type: 'button', onclick: () => editSystem({ id: r.id, name: '' }) }, 'Make this page')) : null]; }
+    body = s ? renderSystem(s) : wait ? [h('p', { class: 'crumb' }, h('a', { href: '#' }, '‹ House manual')), h('p', { class: 'empty' }, wait)] : renderNotFound(r.id, badId); }
   else body = renderHome();
   mount(app, body);
   $('#edit-link').hidden = !owner();

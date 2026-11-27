@@ -1,4 +1,11 @@
 // Placard's own checks, run by test/e2e.mjs on a phone-sized page.
+import { readFile } from 'node:fs/promises';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { SAMPLE } from '../js/starter.js';
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const LEDGER = 'https://script.google.com/macros/s/AKfyTEST/exec';
 const fakeNfc = () => {
   window.__nfc = { writes: [], locks: 0 };
   window.NDEFReader = class {
@@ -7,7 +14,99 @@ const fakeNfc = () => {
     async scan() {}
   };
 };
-export async function appChecks({ page, base, assert }) {
+// A phone on a published manual: js/config.js as served carries a ledger address (published: true), and a pretend
+// ledger answers it with the sample house. L.down: every request fails; L.delay: each waits that long (Google waking
+// the script); L.emailed: what a report's answer says. The service worker is off, so every request reaches the routes.
+async function phone(browser, base, { published = true, dark = false } = {}) {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true,
+    colorScheme: dark ? 'dark' : 'light', serviceWorkers: 'block' });
+  const L = { down: false, delay: 0, emailed: true, reports: [], puts: [], site: structuredClone(SAMPLE['placard.site']) };
+  if (published) await ctx.route(base + 'js/config.js', async r => r.fulfill({ contentType: 'text/javascript',
+    body: (await readFile(join(root, 'js/config.js'), 'utf8')).replace("LEDGER_URL = ''", `LEDGER_URL = '${LEDGER}'`) }));
+  await ctx.route('https://script.google.com/**', async r => {
+    if (L.delay) await new Promise(res => setTimeout(res, L.delay));
+    if (L.down) return r.abort('internetdisconnected');
+    const req = r.request(), json = o => r.fulfill({ contentType: 'application/json', body: JSON.stringify(o) });
+    if (req.method() === 'GET') return json(new URL(req.url()).searchParams.get('op') === 'pub' ? { ok: true, docs: L.site } : { ok: true, app: 'switchboard-ledger', version: '1.1' });
+    const b = JSON.parse(req.postData() || '{}');
+    if (b.op === 'report') { L.reports.push(b.doc); return json({ ok: true, emailed: L.emailed }); }
+    if (b.op === 'batch') {
+      for (const o of b.ops) if (o.op === 'put' && o.coll === 'site') { L.puts.push(o.doc); L.site = L.site.filter(d => d.id !== o.id).concat({ ...o.doc, id: o.id }); }
+      return json({ ok: true, results: b.ops.map(o => ({ ok: true, id: o.id, updated: Date.now() })) });
+    }
+    if (b.op === 'list') return json({ ok: true, time: Date.now(), docs: b.coll === 'site' ? L.site.map(d => ({ ...d, _updated: 1 })) : [] });
+    return json({ ok: true, version: '1.1', time: Date.now() });
+  });
+  const errors = [];
+  ctx.on('page', p => p.on('pageerror', e => errors.push(e.message)));
+  return { ctx, L, errors, page: await ctx.newPage() };
+}
+
+// A tenant: the first tap while Google wakes the script, and a report sent on one bar.
+export async function tenantChecks({ browser, base, assert }) {
+  const { ctx, L, errors, page } = await phone(browser, base);
+  const text = sel => page.locator(sel).evaluate(el => el.textContent.replace(/\s+/g, ' ').trim());
+  try {
+    await page.goto(base + '#water-heater');
+    await page.waitForSelector('.tape >> text=Water heater');
+    // the report form: an urgent line with the number to call, and the field only robots fill in, out of sight
+    await page.click('text=Report a problem or log a visit');
+    assert.equal(await text('dialog .call-now'), 'Urgent? Call 555-0142 now.');
+    assert.equal(await page.locator('dialog .call-now a').getAttribute('href'), 'tel:5550142');
+    const trap = await page.locator('#f-website').evaluate(el => ({ tab: el.tabIndex, auto: el.autocomplete, name: el.name,
+      hidden: el.closest('[aria-hidden="true"]') !== null, off: el.getBoundingClientRect().right <= 0 }));
+    assert.deepEqual(trap, { tab: -1, auto: 'off', name: 'website', hidden: true, off: true }, 'the robot field is missing or in sight');
+    // sent on one bar that then drops: Send waits, and nothing typed is lost
+    L.delay = 1200; L.down = true;
+    await page.fill('#f-text', 'Water on the floor under the tank');
+    await page.fill('#f-name', 'Pat');
+    await page.click('dialog button[type=submit]');
+    await page.waitForTimeout(300);
+    assert.deepEqual(await page.locator('dialog button[type=submit]').evaluate(b => [b.disabled, b.textContent]), [true, 'Sending…'], 'Send isn\'t held while it sends');
+    await page.waitForSelector('dialog .msg.bad');
+    assert.equal(await text('dialog .msg.bad'), 'Couldn\'t send it. Your message is kept: try again, or call.');
+    assert.equal(await page.inputValue('#f-text'), 'Water on the floor under the tank', 'a failed send threw the text away');
+    assert.equal(await page.locator('dialog a.sms').getAttribute('href'), 'sms:5550142?body=' + encodeURIComponent('Water heater: Water on the floor under the tank (Pat)'));
+    assert.equal(await page.locator('dialog button[type=submit]').evaluate(b => b.disabled), false, 'Send stays off after a failure');
+    // closed, and the page opened again later: the form comes back with what was typed
+    await page.click('dialog >> text=Cancel');
+    await page.reload();
+    await page.waitForSelector('.tape >> text=Water heater');
+    await page.click('text=Report a problem or log a visit');
+    assert.deepEqual([await page.inputValue('#f-text'), await page.inputValue('#f-name')], ['Water on the floor under the tank', 'Pat'], 'the unsent report was lost');
+    // the signal is back: it goes, the form closes, and a line stays on the page
+    L.delay = 0; L.down = false;
+    await page.click('dialog button[type=submit]');
+    await page.waitForSelector('.toast.show >> text=Sent. The owner gets it by email.');
+    assert.equal(await page.locator('dialog[open]').count(), 0);
+    assert.match(await text('.sent'), /^Sent to the owner at \d{1,2}:\d\d [ap]m\.$/);
+    assert.deepEqual(L.reports.map(r => [r.system, r.text, r.name, r.website]), [['water-heater', 'Water on the floor under the tank', 'Pat', '']]);
+    assert.equal(await page.evaluate(() => JSON.stringify(JSON.parse(localStorage.getItem('placard.draft') || '{}')['water-heater'] || null)), 'null', 'the draft was kept after it sent');
+    await page.click('text=Report a problem or log a visit');
+    assert.equal(await page.inputValue('#f-text'), '', 'the sent report came back in the form');
+    await page.click('dialog >> text=Cancel');
+    // the front page has the form too; when the ledger kept it but couldn't email, it says to call if it's urgent
+    await page.goto(base + '#');
+    await page.waitForSelector('.urgent-tile');
+    L.emailed = false;
+    await page.click('text=Report a problem');
+    await page.fill('#f-text', 'The porch light is out.');
+    await page.click('dialog button[type=submit]');
+    await page.waitForSelector('.toast.show >> text=Saved for the owner. If it\'s urgent, call.');
+    assert.match(await text('.sent'), /^Saved for the owner at \d{1,2}:\d\d [ap]m\. If it's urgent, call\.$/);
+    assert.deepEqual([L.reports[1].system, L.reports[1].text], ['', 'The porch light is out.']);
+    // a sticker whose page was deleted still helps: who to call, the form and the way to the front page
+    await page.goto(base + '#old-boiler');
+    await page.waitForSelector('text=This sticker\'s page isn\'t in the manual yet.');
+    assert.equal(await page.locator('#app .contact a[href^="tel:"]').getAttribute('href'), 'tel:5550142');
+    assert.equal(await page.locator('#app button', { hasText: 'Report a problem' }).count(), 1);
+    assert.equal(await page.locator('#app a.btn[href="#"]').count(), 1, 'no way to the front page');
+    assert.deepEqual(errors, [], 'errors on the tenant pages');
+  } finally { await ctx.close(); }
+}
+
+export async function appChecks({ page, ctx, base, assert }) {
+  await tenantChecks({ browser: ctx.browser(), base, assert });
   // a tenant on an unpublished manual
   assert.match(await page.locator('#app').innerText(), /Not published yet/);
   // the sample house, as a tenant would see it after tapping a sticker
@@ -23,7 +122,7 @@ export async function appChecks({ page, base, assert }) {
   // report a problem
   await page.click('text=Report a problem or log a visit');
   await page.fill('#f-text', 'The tank is making a ticking noise.');
-  await page.click('dialog >> text=Send');
+  await page.click('dialog button[type=submit]');
   await page.waitForSelector('.toast.show >> text=Sent');
   // owner: write and lock the sticker, then edit the page
   await page.click('text=Write sticker');

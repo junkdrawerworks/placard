@@ -13,7 +13,7 @@
 
 - **Public pages.** Anyone can read the manual. It comes from the owner's Switchboard ledger with no key, and the phone keeps a copy for next time.
 - **Locked stickers.** Each sticker can be made read-only after it's checked, so nobody can rewrite it to point somewhere else. Its link goes through Switchboard, so the page can still move.
-- **Reports.** A form on every page sends the owner an email and keeps the note in the ledger, a few an hour at most.
+- **Reports.** A form on every page, the front page included, keeps the note in the ledger and emails the owner: at most 30 reports an hour, and 20 emails a day (past that the note is still kept, and the tenant is told to call if it's urgent). What's typed stays on the phone until it sends, and a failed send offers a text message to the contact instead.
 - **QR backups.** A printable sheet of QR codes, one per system, for phones with NFC switched off.
 - **Sample house.** Open it with `?demo` for a made-up house to try everything on.
 - **Switchboard.** Records live in your Switchboard ledger (a Google Sheet you own), so they follow you between the phone and the laptop. Connect from [tag.junkdrawer.works](https://tag.junkdrawer.works/).

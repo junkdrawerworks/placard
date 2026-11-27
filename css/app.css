@@ -15,6 +15,10 @@ ol.steps li::before { content: counter(st); position: absolute; left: 12px; top:
 .owner { border-style: dashed; margin-top: 22px; }
 #edit-link { font-size: 15px; }
 .report p { margin: 0 0 6px; }
+.call-now a { font-weight: 600; }
+.sent { margin: -6px 0 14px; }
+dialog .sms { margin: 8px 0 0; }
+.trap { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; } /* the field only robots fill in */
 .qr-sheet { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
 .qr-card { display: flex; gap: 10px; align-items: center; background: #fff; color: #000; border: 1px dashed #999; border-radius: 8px; padding: 8px; break-inside: avoid; }
 .qr-card .qr svg { display: block; }
