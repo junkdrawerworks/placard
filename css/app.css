@@ -3,7 +3,6 @@
 @media (prefers-color-scheme: dark) { :root { --accent: #C9D6EE; --accent-ink: #12192A; --tape: #2E4A75; --tape-edge: #0E1726; } }
 .lead { font-size: 19px; margin: 0 0 14px; }
 .where { margin: -4px 0 12px; }
-.crumb { margin: 0 0 8px; font-size: 15px; } .crumb a { color: var(--ink2); text-decoration: none; }
 ol.steps { padding-left: 0; margin: 0 0 14px; list-style: none; counter-reset: st; }
 ol.steps li { counter-increment: st; position: relative; padding: 10px 12px 10px 48px; margin: 0 0 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
 ol.steps li::before { content: counter(st); position: absolute; left: 12px; top: 9px; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font: 700 16px/26px var(--display); text-align: center; }

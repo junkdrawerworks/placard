@@ -647,6 +647,8 @@ export async function appChecks({ page, ctx, base, assert }) {
   await keyboardChecks({ browser: ctx.browser(), base, assert });
   // Back from a page 40 rows down the owner's front page lands where the list was
   const { backKeepsPlace } = await import('./kit-checks.mjs');
+  // every link, button and card header on the sample's screens is a 44 px target
+  await (await import('./kit-checks.mjs')).targetsAudit({ browser: ctx.browser(), base, assert, hashes: ['', '#water-heater', '#/owner', '#/print', '#/reports', '#nope'] });
   await backKeepsPlace({ browser: ctx.browser(), base, assert, app: 'placard', colls: { reports: [],
     site: [{ id: 'house', title: 'House manual' }, ...Array.from({ length: 50 }, (_, i) => ({ id: `system-${i + 1}`, name: `System ${i + 1}`, kind: 'other', where: 'Basement', order: i + 1 }))] } });
   // a tenant on an unpublished manual
