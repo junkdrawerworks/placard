@@ -134,6 +134,57 @@ export async function tenantChecks({ browser, base, assert }) {
   } finally { await ctx.close(); }
 }
 
+// A tenant whose read fails: the page says so with a Try again button, and reads again by itself when the signal comes
+// back; a phone with a copy shows it, says how old it is, and the line goes after the next good read.
+export async function retryChecks({ browser, base, assert }) {
+  const { ctx, L, errors, page } = await phone(browser, base);
+  // no signal as the phone sees it: navigator.onLine follows test.offline
+  await ctx.addInitScript(() => Object.defineProperty(Navigator.prototype, 'onLine', { configurable: true, get: () => !localStorage.getItem('test.offline') }));
+  const offline = on => page.evaluate(on => { if (on) localStorage.setItem('test.offline', '1'); else { localStorage.removeItem('test.offline'); dispatchEvent(new Event('online')); } }, on);
+  const text = sel => page.locator(sel).evaluate(el => el.textContent.replace(/\s+/g, ' ').trim());
+  try {
+    // a first visit with no signal: No connection, and a Try again a thumb can hit
+    L.down = true;
+    await page.goto(base + '#water-heater');
+    await offline(true);
+    await page.waitForSelector('text=No connection.');
+    const again = page.locator('#app button', { hasText: 'Try again' });
+    assert.ok((await again.boundingBox())?.height >= 44, 'no Try again button, or one too small to tap');
+    // the signal comes back: the page loads by itself, with no reload
+    L.down = false;
+    const t0 = Date.now();
+    await offline(false);
+    await page.waitForSelector('.tape >> text=Water heater', { timeout: 2000 });
+    assert.ok(Date.now() - t0 < 2000);
+    assert.equal(await page.locator('.stale').count(), 0);
+    // the copy kept, and opened again a few days later with no signal: it shows, and says when it was saved
+    const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const was = new Date(Date.now() - 3 * 86400000), when = MON[was.getMonth()] + ' ' + was.getDate() + (was.getFullYear() === new Date().getFullYear() ? '' : ', ' + was.getFullYear());
+    await page.evaluate(at => { const k = JSON.parse(localStorage.getItem('placard.public')); localStorage.setItem('placard.public', JSON.stringify({ ...k, at })); }, was.getTime());
+    L.down = true;
+    await offline(true);
+    await page.reload();
+    await page.waitForSelector('.stale');
+    assert.equal(await text('.stale p'), `No signal. This is the copy saved ${when}. A number may have changed since.`);
+    assert.equal(await page.locator('.tape').textContent(), 'Water heater', 'the kept copy isn\'t shown');
+    // the manager changed the number meanwhile; back in signal, the line goes and the new number shows
+    L.site[0] = { ...L.site[0], contact: { ...L.site[0].contact, phone: '555-0999' } };
+    L.down = false;
+    await offline(false);
+    await page.waitForFunction(() => !document.querySelector('.stale'), null, { timeout: 2000 });
+    assert.equal(await page.locator('.contact a[href^="tel:"]').getAttribute('href'), 'tel:5550999');
+    // Try again on its own, with no online event: a first visit, then the signal back and a press
+    await page.evaluate(() => localStorage.removeItem('placard.public'));
+    L.down = true;
+    await page.reload();
+    await page.waitForSelector('text=No connection.');
+    L.down = false;
+    await page.click('#app button >> text=Try again');
+    await page.waitForSelector('.tape >> text=Water heater', { timeout: 4000 });
+    assert.deepEqual(errors, [], 'errors while the manual was retried');
+  } finally { await ctx.close(); }
+}
+
 // The owner, connected (not the sample): the status line on every page, whether a save has reached tenants, and the
 // guide part that puts the ledger address in js/config.js.
 export async function ownerChecks({ browser, base, assert }) {
@@ -331,6 +382,7 @@ export async function appChecks({ page, ctx, base, assert }) {
   await ownerChecks({ browser: ctx.browser(), base, assert });
   await secondOwnerChecks({ browser: ctx.browser(), base, assert });
   await oddRecordChecks({ browser: ctx.browser(), base, assert });
+  await retryChecks({ browser: ctx.browser(), base, assert });
   // a tenant on an unpublished manual
   assert.match(await page.locator('#app').innerText(), /Not published yet/);
   // the sample house, as a tenant would see it after tapping a sticker

@@ -22,6 +22,7 @@ ol.steps li::before { content: counter(st); position: absolute; left: 12px; top:
 .call-now { display: block; min-height: 44px; text-decoration: none; } /* the report form's urgent line: all of it dials */
 .call-now b { font-weight: 600; text-decoration: underline; }
 .sent { margin: -6px 0 14px; }
+.notice .btns { margin: 10px 0 0; } .notice.warn .btn.ghost { border-color: var(--warn); color: var(--ink); } /* Try again */
 dialog .sms { margin: 8px 0 0; }
 .trap { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; } /* the field only robots fill in */
 .qr-sheet { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }

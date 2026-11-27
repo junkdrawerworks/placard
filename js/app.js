@@ -16,6 +16,8 @@ const app = $('#app');
 let site = [];          // the docs everyone sees
 let siteError = '';
 let loading = false;    // a tenant's first visit, nothing kept yet, waiting on the ledger
+let copyAt = 0;         // when the tenant's kept copy came from the ledger (0: a copy kept before that was noted)
+let stale = '';         // the tenant's read failed, and the kept copy is on screen: why ('offline')
 
 const jget = k => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; } };
 const jset = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
@@ -54,19 +56,56 @@ async function load() {
     render();
     ledger.keepUp(['site', 'reports'], () => { fromLedger(); render(); });
     return;
-  } else {
-    site = pages(jget('placard.public'));
-    if (!LEDGER_URL) { siteError = 'unset'; }
-    else {
-      // The copy kept from last time straight away; with none, a line while Google wakes the script (a few seconds).
-      loading = !site.length;
-      render();
-      try { const docs = await publicRead(LEDGER_URL, 'placard', 'site'); site = pages(docs); jset('placard.public', docs); siteError = ''; }
-      catch (e) { siteError = site.length ? '' : 'offline'; }
-      loading = false;
-    }
   }
-  render();
+  // A tenant: the copy kept from last time straight away, then the ledger's. With no copy, a line while Google wakes
+  // the script (a few seconds).
+  const kept = jget(PUBLIC);
+  site = pages(Array.isArray(kept) ? kept : kept?.docs);
+  copyAt = Number(kept?.at) || 0;
+  if (!LEDGER_URL) { siteError = 'unset'; render(); return; }
+  readPublic();
+}
+
+// A tenant's read of the manual. The copy is kept with the time it came ({ at, docs } in placard.public). When the read
+// fails, the page says so (no copy: No connection, with Try again; with one: a line at the top saying how old it is) and
+// reads again when the phone comes back online or the page is looked at again, and every 20 s while it says so. A good
+// read ends it.
+const PUBLIC = 'placard.public', AGAIN = 20000;
+let reading = null, again = null;
+function readPublic() {
+  if (reading) return reading;
+  clearTimeout(again);
+  if (!site.length && !loading) { loading = true; render(); }
+  reading = (async () => {
+    try {
+      const docs = await publicRead(LEDGER_URL, 'placard', 'site');
+      copyAt = Date.now(); jset(PUBLIC, { at: copyAt, docs });
+      site = pages(docs); siteError = ''; stale = '';
+    } catch (e) {
+      if (site.length) stale = 'offline'; else siteError = 'offline';
+      again = setTimeout(readPublic, AGAIN);
+    } finally { loading = false; reading = null; }
+    render();
+  })();
+  return reading;
+}
+const failing = () => !owner() && !!LEDGER_URL && (!!stale || siteError === 'offline');
+window.addEventListener('online', () => { if (failing()) readPublic(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && failing()) readPublic(); });
+const tryAgain = () => h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn ghost', onclick: e => {
+  e.currentTarget.disabled = true; e.currentTarget.textContent = 'Trying…'; readPublic(); } }, 'Try again'));
+// "today at 3:04 pm", "Nov 20", "Nov 20, 2025"
+const savedWhen = at => {
+  if (!at) return 'on this phone';
+  const d = new Date(at), now = new Date();
+  if (today(d) === today(now)) return `today at ${clock(at)}`;
+  const day = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return d.getFullYear() === now.getFullYear() ? day : `${day}, ${d.getFullYear()}`;
+};
+function staleNotice() {
+  if (owner() || !stale || !site.length) return null;
+  return h('div', { class: 'notice warn stale' },
+    h('p', {}, h('b', {}, 'No signal. '), `This is the copy saved ${savedWhen(copyAt)}. A number may have changed since.`));
 }
 
 // ---------------------------------------------------------------- tenant pages
@@ -418,7 +457,7 @@ function render() {
   let body;
   if (!owner() && !site.length && loading) body = [h('div', { class: 'notice' }, h('p', {}, h('b', {}, 'Loading the house manual… '), 'The first time takes a few seconds.'))];
   else if (!owner() && !site.length && siteError === 'unset') body = [h('div', { class: 'notice' }, h('p', {}, h('b', {}, 'Not published yet. '), 'This house manual hasn\'t been put online. If you tapped a sticker, please call the number you were given.'))];
-  else if (!owner() && !site.length && siteError === 'offline') body = [h('div', { class: 'notice warn' }, h('p', {}, h('b', {}, 'No connection. '), 'The house manual needs a signal the first time. Try again near a window, or call the number you were given.'))];
+  else if (!owner() && !site.length && siteError === 'offline') body = [h('div', { class: 'notice warn' }, h('p', {}, h('b', {}, 'No connection. '), 'The house manual needs a signal the first time. Try again near a window, or call the number you were given.'), tryAgain())];
   else if (r.view === 'owner' && owner()) body = renderOwner();
   else if (r.view === 'print' && owner()) body = renderPrint();
   else if (r.view === 'reports' && owner()) body = renderReports();
@@ -428,7 +467,7 @@ function render() {
     body = s ? renderSystem(s) : wait ? [h('p', { class: 'crumb' }, h('a', { href: '#' }, '‹ House manual')), h('p', { class: 'empty' }, wait)] : renderNotFound(r.id, badId); }
   else body = renderHome();
   // The owner sees the ledger's status line on every page, as in the other tag apps (tenants never do).
-  mount(app, owner() ? h('p', { class: 'sync ' + ledger.state }, ledger.statusText()) : null, body);
+  mount(app, owner() ? h('p', { class: 'sync ' + ledger.state }, ledger.statusText()) : staleNotice(), body);
   $('#edit-link').hidden = !owner();
   document.title = r.view === 'item' && sys(r.id) ? `${sys(r.id).name} · Placard` : 'Placard';
   if (demo) { $('#demo-note').hidden = false; if (!$('#demo-note .sample-out')) $('#demo-note p').append(' ', sampleLink()); }
