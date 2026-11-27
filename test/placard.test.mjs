@@ -1,11 +1,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseFacts, factsText, lines, STARTER, SAMPLE, checkPage, mergeFacts, mergeImport } from '../js/starter.js';
+import { parseFacts, factsText, lines, STARTER, SAMPLE, checkPage, mergeFacts, mergeImport, dial } from '../js/starter.js';
 
 test('details lines round-trip', () => {
   const f = parseFacts('Model: XE50T10\n\nFilter: 16 × 25 × 1\nno colon here\nTime: 3:30');
   assert.deepEqual(f, [['Model', 'XE50T10'], ['Filter', '16 × 25 × 1'], ['', 'no colon here'], ['Time', '3:30']]);
   assert.equal(factsText(f), 'Model: XE50T10\nFilter: 16 × 25 × 1\nno colon here\nTime: 3:30');
+});
+test('a link or a time on a details line of its own stays one value, and survives an edit', () => {
+  const f = parseFacts('https://example.com/valve-manual.pdf\nPumped 10:30 am Tuesdays\nManual: https://example.com/m.pdf\nModel:XE50T10\nFilter:\nAlso: 1:30 or 2:45');
+  assert.deepEqual(f, [['', 'https://example.com/valve-manual.pdf'], ['', 'Pumped 10:30 am Tuesdays'], ['Manual', 'https://example.com/m.pdf'],
+    ['Model', 'XE50T10'], ['Filter', ''], ['Also', '1:30 or 2:45']]);
+  assert.deepEqual(parseFacts(factsText(f)), f, 'a second edit changed the details');
+});
+test('Call dials the first number, without its extension', () => {
+  for (const [typed, number] of [['845-555-0100 ext. 12', '8455550100'], ['845-555-0100 x12', '8455550100'], ['845-555-0100, ext 12', '8455550100'],
+    ['(845) 555-0100 Ext 4', '8455550100'], ['845-555-0100 or 845-555-0199', '8455550100'], ['+1 (845) 555-0100', '+18455550100'], ['555-0142', '5550142'], ['', '']])
+    assert.equal(dial(typed), number, typed);
 });
 test('steps drop their own numbering', () => {
   assert.deepEqual(lines('1. Turn it\n2) Wait\n- Call\n\n'), ['Turn it', 'Wait', 'Call']);

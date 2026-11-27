@@ -16,7 +16,8 @@ ol.steps li::before { content: counter(st); position: absolute; left: 12px; top:
 #edit-link { font-size: 15px; }
 .report p { margin: 0 0 6px; }
 .report.dim { opacity: .55; } /* handled */
-.call-now a { font-weight: 600; }
+.call-now { display: block; min-height: 44px; text-decoration: none; } /* the report form's urgent line: all of it dials */
+.call-now b { font-weight: 600; text-decoration: underline; }
 .sent { margin: -6px 0 14px; }
 dialog .sms { margin: 8px 0 0; }
 .trap { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; } /* the field only robots fill in */

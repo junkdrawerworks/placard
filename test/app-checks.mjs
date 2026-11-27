@@ -64,7 +64,10 @@ export async function tenantChecks({ browser, base, assert }) {
     // the report form: an urgent line with the number to call, and the field only robots fill in, out of sight
     await page.click('text=Report a problem or log a visit');
     assert.equal(await text('dialog[open] .call-now'), 'Urgent? Call 555-0142 now.');
-    assert.equal(await page.locator('dialog[open] .call-now a').getAttribute('href'), 'tel:5550142');
+    assert.equal(await page.locator('dialog[open] a.call-now').getAttribute('href'), 'tel:5550142');
+    // all of the amber band dials, not just its words: at least 44 px tall and as wide as the form
+    const band = await page.locator('dialog[open] a.call-now').evaluate(el => { const r = el.getBoundingClientRect(), f = el.closest('form').getBoundingClientRect(); return [r.height >= 44, Math.abs(r.width - f.width) < 1]; });
+    assert.deepEqual(band, [true, true], 'the urgent line\'s call link is smaller than the band');
     const trap = await page.locator('dialog[open] #f-website').evaluate(el => ({ tab: el.tabIndex, auto: el.autocomplete, name: el.name,
       hidden: el.closest('[aria-hidden="true"]') !== null, off: el.getBoundingClientRect().right <= 0 }));
     assert.deepEqual(trap, { tab: -1, auto: 'off', name: 'website', hidden: true, off: true }, 'the robot field is missing or in sight');
@@ -261,6 +264,7 @@ export async function oddRecordChecks({ browser, base, assert }) {
   for (const who of ['tenant', 'owner']) {
     const { ctx, L, errors, page } = await phone(browser, base, { published: who === 'tenant' });
     L.site.push(...structuredClone(ODD));
+    L.site[0].contact.phone = '845-555-0100 ext. 12';   // an extension: Call dials the number, and shows all of it
     if (who === 'owner') await ctx.addInitScript(u => localStorage.setItem('placard.ledger', JSON.stringify({ url: u, key: 'k'.repeat(40) })), LEDGER);
     const rows = () => page.locator('.list .row .t').allTextContents();
     try {
@@ -269,6 +273,11 @@ export async function oddRecordChecks({ browser, base, assert }) {
       const all = await rows();
       for (const name of ['Attic', 'Crawl space', 'Boiler', 'Shed', 'Water heater']) assert.ok(all.includes(name), `${who}: "${name}" isn't listed (${all.join(', ')})`);
       if (who === 'tenant') {
+        assert.deepEqual(await page.locator('.contact .btns a').evaluateAll(as => as.map(a => [a.textContent, a.getAttribute('href')])),
+          [['Call 845-555-0100 ext. 12', 'tel:8455550100'], ['Text', 'sms:8455550100'], ['Email', 'mailto:help@example.com']], 'the extension was dialled as part of the number');
+        await page.click('text=Report a problem');
+        assert.equal(await page.locator('dialog[open] a.call-now').getAttribute('href'), 'tel:8455550100');
+        await page.click('dialog[open] >> text=Cancel');
         const other = await page.locator('section', { has: page.locator('h2', { hasText: 'Everything else' }) }).locator('.row .t').allTextContents();
         assert.deepEqual(other.sort(), ['Attic', 'Boiler', 'Crawl space', 'Shed'], 'a page in a group Placard doesn\'t know isn\'t listed');
         await page.goto(base + '#attic');

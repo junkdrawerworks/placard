@@ -27,14 +27,19 @@ export const STARTER = [
   ['trash', 'Trash and recycling', 'other'],
 ].map(([id, name, kind, emergency], i) => ({ id, name, kind, emergency: !!emergency, order: i + 1 }));
 
-// "Label: value" lines to [[label, value], …] and back.
+// "Label: value" lines to [[label, value], …] and back. The label ends at the first colon with a space after it, or one
+// with neither // nor a digit after it ("Model:XE50T10"), so a link ("https://…/valve.pdf") or a time ("Pumped
+// 10:30 am") on a line of its own stays one value.
 export function parseFacts(text) {
   return String(text || '').split('\n').map(l => l.trim()).filter(Boolean).map(l => {
-    const i = l.indexOf(':');
-    return i > 0 ? [l.slice(0, i).trim(), l.slice(i + 1).trim()] : ['', l];
+    const m = /^(.+?):(?: |(?!\/\/|\d))/.exec(l);
+    return m ? [m[1].trim(), l.slice(m[0].length).trim()] : ['', l];
   });
 }
 export const factsText = facts => (facts || []).map(([k, v]) => (k ? `${k}: ${v}` : v)).join('\n');
+// The number a Call or Text button dials: the first one written, without an extension ("845-555-0100 ext. 12",
+// "… x12", "…, ext 12") or a second number ("… or 845-555-0199"). The button still shows all of it.
+export const dial = phone => String(phone || '').split(/\s*(?:\bext\b\.?|\bx\s*\d|,|;|\bor\b)/i)[0].replace(/[^\d+]/g, '');
 export { lines };   // the kit's: one entry per line, typed numbering and bullets taken off
 
 export const SAMPLE = {

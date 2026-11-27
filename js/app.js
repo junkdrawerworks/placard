@@ -5,7 +5,7 @@ import { Ledger, watchConnectLinks, publicRead, publicReport, refusal, importSum
 import { tagUrl } from './kit/tags.js';
 import { nfcPanel } from './kit/panel.js';
 import { LEDGER_URL } from './config.js';
-import { KINDS, STARTER, SAMPLE, parseFacts, factsText, lines, mergeImport } from './starter.js';
+import { KINDS, STARTER, SAMPLE, parseFacts, factsText, lines, mergeImport, dial } from './starter.js';
 
 const params = new URLSearchParams(location.search);
 const demo = params.has('demo');
@@ -70,15 +70,18 @@ async function load() {
 }
 
 // ---------------------------------------------------------------- tenant pages
+// Call and Text dial the first number written, without an extension (dial()); the button shows all of it.
 function contactCard(c) {
   if (!c || !(c.phone || c.email)) return null;
+  const tel = dial(c.phone);
   return h('section', { class: 'card contact' },
     h('h2', {}, 'Who to call'),
     h('p', { class: 'who' }, c.name || ''),
     c.note ? h('p', { class: 'muted' }, c.note) : null,
+    c.phone && !tel ? h('p', {}, c.phone) : null,
     h('div', { class: 'btns' },
-      c.phone ? h('a', { class: 'btn', href: 'tel:' + c.phone.replace(/[^\d+]/g, '') }, 'Call ' + c.phone) : null,
-      c.phone ? h('a', { class: 'btn ghost', href: 'sms:' + c.phone.replace(/[^\d+]/g, '') }, 'Text') : null,
+      tel ? h('a', { class: 'btn', href: 'tel:' + tel }, 'Call ' + c.phone) : null,
+      tel ? h('a', { class: 'btn ghost', href: 'sms:' + tel }, 'Text') : null,
       c.email ? h('a', { class: 'btn ghost', href: 'mailto:' + c.email }, 'Email') : null));
 }
 
@@ -136,7 +139,6 @@ const keepDraft = (key, v) => {
 let sent = {};
 try { sent = JSON.parse(sessionStorage.getItem('placard.sent') || '{}'); } catch {}
 const clock = ms => { const d = new Date(ms); return `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${d.getHours() < 12 ? 'am' : 'pm'}`; };
-const dial = phone => String(phone || '').replace(/[^\d+]/g, '');
 
 function reportButton(s, label) {
   const done = sent[s?.id || ''];
@@ -165,7 +167,8 @@ function report(s) {
   const send = h('button', { type: 'submit', class: 'btn' }, 'Send');
   const dlg = h('dialog', { class: 'sheet' });
   const form = h('form', { method: 'dialog' },
-    tel ? h('p', { class: 'notice warn call-now' }, 'Urgent? ', h('a', { href: 'tel:' + tel }, `Call ${c.phone} now`), '.') : null,
+    // the whole amber band is the link, a target a thumb can't miss
+    tel ? h('a', { class: 'notice warn call-now', href: 'tel:' + tel }, 'Urgent? ', h('b', {}, `Call ${c.phone} now`), '.') : null,
     field('kind', 'This is', kind),
     field('text', 'What happened', text),
     field('name', 'Your name', name),
