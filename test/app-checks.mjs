@@ -329,6 +329,101 @@ export async function numbersChecks({ browser, base, assert }) {
   } finally { await ctx.close(); }
 }
 
+// A photo on a page: a file in the repo's photos folder, named on the page, shown under Where and larger when tapped.
+// The owner types its name (a link or a path is turned down), and is told when the file isn't there; a tenant just
+// doesn't see one that isn't. After a tenant's good read every page's photo is kept by the service worker, so a page
+// opened later with no signal still has its picture.
+export async function photoChecks({ browser, base, assert }) {
+  const { ctx, L, errors, page } = await phone(browser, base);
+  await ctx.addInitScript(u => localStorage.setItem('placard.ledger', JSON.stringify({ url: u, key: 'k'.repeat(40) })), LEDGER);
+  const shown = () => page.locator('figure.photo img').evaluate(i => i.complete && i.naturalWidth);
+  try {
+    await page.goto(base + '#water-shutoff');
+    await page.waitForSelector('.tape >> text=Main water shutoff');
+    // under Where, the sample's made-up picture at its full 1200 px
+    assert.deepEqual(await page.locator('.where + figure.photo').count(), 1, 'the photo isn\'t under Where');
+    await page.waitForFunction(() => document.querySelector('figure.photo img')?.naturalWidth > 0);
+    assert.equal(await shown(), 1200);
+    assert.deepEqual(await page.locator('figure.photo img').evaluate(i => [i.getAttribute('src'), i.alt]),
+      ['photos/sample-shutoff.jpg', 'Main water shutoff: Basement, left of the pressure tank, at waist height.']);
+    assert.ok((await page.locator('figure.photo').boundingBox()).width <= 358, 'the photo is wider than the page');
+    // tapped: the whole picture, closed with Close, by a tap, or with Back (Escape)
+    for (const close of ['Close', 'tap', 'Escape']) {
+      await page.click('.photo-btn');
+      const view = page.locator('dialog.photo-view[open]');
+      await view.waitFor();
+      assert.equal(await view.locator('img').getAttribute('src'), 'photos/sample-shutoff.jpg');
+      if (close === 'Close') await view.locator('button', { hasText: 'Close' }).click();
+      else if (close === 'tap') await view.locator('img').click();
+      else await page.keyboard.press('Escape');
+      await page.waitForSelector('dialog.photo-view', { state: 'detached' });
+    }
+    // the owner names it: a link, or a path out of the folder, is turned down with the sheet kept open
+    await page.click('text=Edit this page');
+    assert.equal(await page.inputValue('#f-photo'), 'sample-shutoff.jpg');
+    for (const bad of ['https://example.com/valve.jpg', '../js/app.js', 'valve.pdf', 'photos/sub/valve.jpg']) {
+      await page.fill('#f-photo', bad);
+      await page.click('dialog[open] button[type=submit]');
+      await page.waitForSelector('dialog[open] .sheet-msg >> text=A photo is the name of a file in the photos folder, like water-shutoff.jpg (a .jpg, .png or .webp).');
+    }
+    // "photos/" typed before it is taken off; a file not in the repo says so, to the owner
+    await page.fill('#f-photo', 'photos/valve.jpg');
+    await page.click('dialog[open] button[type=submit]');
+    await page.waitForSelector('.photo-missing');
+    assert.equal(await page.locator('.photo-missing').textContent(), 'photos/valve.jpg didn\'t load. Is it in the photos folder of the placard repo?');
+    assert.equal(await page.evaluate(() => window.__placard.ledger.doc('site', 'water-shutoff').photo), 'valve.jpg');
+    assert.equal(await page.locator('figure.photo').count(), 0);
+    // cleared: no photo, no line
+    await page.click('text=Edit this page');
+    await page.fill('#f-photo', '');
+    await page.click('dialog[open] button[type=submit]');
+    await page.waitForFunction(() => window.__placard.ledger.doc('site', 'water-shutoff').photo === '');
+    assert.deepEqual([await page.locator('figure.photo').count(), await page.locator('.photo-missing').count()], [0, 0]);
+    // a page with a photo typed into the sheet as a link or a path shows none, to the owner or a tenant
+    L.site = L.site.map(d => d.id === 'water-shutoff' ? { ...d, photo: 'https://example.com/valve.jpg' } : d.id === 'water-heater' ? { ...d, photo: 'nope.jpg' } : d);
+    const tenant = await phone(browser, base);
+    tenant.L.site = L.site;
+    await tenant.page.goto(base + '#water-shutoff');
+    await tenant.page.waitForSelector('.tape >> text=Main water shutoff');
+    assert.deepEqual([await tenant.page.locator('figure.photo').count(), await tenant.page.locator('img').count()], [0, 0], 'a photo from another site');
+    // and a tenant whose page names a file that isn't there sees nothing about it
+    await tenant.page.goto(base + '#water-heater');
+    await tenant.page.waitForSelector('.tape >> text=Water heater');
+    await tenant.page.waitForFunction(() => !document.querySelector('figure.photo'));
+    assert.equal(await tenant.page.locator('.photo-missing').count(), 0);
+    assert.deepEqual(tenant.errors, []);
+    await tenant.ctx.close();
+    assert.deepEqual(errors, []);
+  } finally { await ctx.close(); }
+  // Offline: a tenant's phone with the service worker on. A visit to the front page alone, once the worker runs it, keeps
+  // the shutoff's photo; with no signal the next day, the shutoff's page opens from the copy with its picture.
+  const off = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  try {
+    await off.route(base + 'js/config.js', configAs(LEDGER));
+    await off.route('https://script.google.com/**', r => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, docs: SAMPLE['placard.site'] }) }));
+    const page = await off.newPage();
+    await page.goto(base);
+    await page.waitForSelector('.urgent-tile');
+    await page.waitForFunction(() => navigator.serviceWorker?.controller, null, { timeout: 15000 });
+    await page.reload();   // a second visit, run by the worker: the read asks for the photos it hasn't kept
+    await page.waitForSelector('.urgent-tile');
+    await page.waitForFunction(async () => !!(await caches.match('photos/sample-shutoff.jpg')), null, { timeout: 15000, polling: 250 });
+    assert.equal(await page.locator('figure.photo').count(), 0, 'the front page showed a photo');
+    await off.setOffline(true);
+    await off.unroute(base + 'js/config.js');
+    await page.reload();
+    await page.waitForSelector('.urgent-tile');
+    // the worker's own requests are offline too (some Chromium builds let them through): a file it never kept comes back
+    // as the copy's page, not as the server's 404, so the photo below can only have come from the copy
+    assert.equal(await page.evaluate(async () => { const r = await fetch('photos/never-kept.jpg'); return `${r.status} ${(await r.text()).includes('<title>Placard</title>')}`; }), '200 true',
+      'the service worker reached the server while offline');
+    await page.evaluate(() => { location.hash = '#water-shutoff'; });
+    await page.waitForSelector('.tape >> text=Main water shutoff');
+    await page.waitForFunction(() => document.querySelector('figure.photo img')?.complete, null, { timeout: 10000 });
+    assert.equal(await page.locator('figure.photo img').evaluate(i => i.naturalWidth), 1200, 'the photo didn\'t open with no signal');
+  } finally { await off.setOffline(false).catch(() => {}); await off.close(); }
+}
+
 export async function retryChecks({ browser, base, assert }) {
   const { ctx, L, errors, page } = await phone(browser, base);
   // no signal as the phone sees it: navigator.onLine is false while the cookie offline=1 is set
@@ -1079,6 +1174,7 @@ export async function appChecks({ page, ctx, base, assert, problems }) {
   }
   await tenantChecks({ browser: ctx.browser(), base, assert });
   await fireChecks({ browser: ctx.browser(), base, assert });
+  await photoChecks({ browser: ctx.browser(), base, assert });
   await numbersChecks({ browser: ctx.browser(), base, assert });
   await ownerChecks({ browser: ctx.browser(), base, assert });
   await forwardChecks({ browser: ctx.browser(), base, assert });

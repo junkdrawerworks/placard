@@ -3,6 +3,14 @@
 @media (prefers-color-scheme: dark) { :root { --accent: #C9D6EE; --accent-ink: #12192A; --tape: #2E4A75; --tape-edge: #0E1726; } }
 .lead { font-size: 19px; margin: 0 0 14px; }
 .where { margin: -4px 0 12px; }
+/* a page's photo under Where, and the whole picture when it's tapped */
+.photo { margin: 0 0 14px; } .photo-missing { margin: -4px 0 12px; } /* the owner's line for a file not in the repo */
+.photo-btn { display: block; width: 100%; padding: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--soft); cursor: zoom-in; }
+.photo-btn img { display: block; width: 100%; height: auto; max-height: 340px; object-fit: contain; }
+dialog.photo-view { border: 0; padding: 0 0 env(safe-area-inset-bottom, 0); margin: 0; width: 100vw; height: 100vh; height: 100dvh; max-width: none; max-height: none; background: #000; }
+dialog.photo-view::backdrop { background: #000; }
+dialog.photo-view img { display: block; width: 100%; height: calc(100% - 72px); object-fit: contain; }
+dialog.photo-view .btns { justify-content: center; margin: 12px 0; }
 ol.steps { padding-left: 0; margin: 0 0 14px; list-style: none; counter-reset: st; }
 ol.steps li { counter-increment: st; position: relative; padding: 10px 12px 10px 48px; margin: 0 0 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
 ol.steps li::before { content: counter(st); position: absolute; left: 12px; top: 9px; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font: 700 16px/26px var(--display); text-align: center; }

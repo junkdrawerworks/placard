@@ -64,6 +64,15 @@ export function splitLinks(text) {
   return out;
 }
 
+// A page's photo: a file in the repo's photos folder, by its name ('water-shutoff.jpg', with a 'photos/' typed before it
+// taken off). '' for none, null for something that can't be one (a link, a path, another kind of file), so a page only
+// ever shows a picture from this site, which a tenant's phone keeps for a tap with no signal.
+const PHOTO = /^[a-z0-9][a-z0-9._-]{0,79}\.(?:jpe?g|png|webp)$/i;
+export function photoName(v) {
+  const s = String(v ?? '').trim().replace(/^\.?\/?photos\//i, '');
+  return !s ? '' : PHOTO.test(s) && !s.includes('..') ? s : null;
+}
+
 // ---- the Reports screen
 // How to answer a report: a phone number in its contact (Call and Text dial it, as the contact card's do) and an email
 // address. A contact that's only a number however it's typed ("5550101", "+1 845 555 0101") counts as a phone too.
@@ -110,7 +119,7 @@ export const SAMPLE = {
     { id: 'house', title: 'House manual', intro: 'Tap any sticker in the house for what that thing is and what to do about it. In an emergency, start here.',
       contact: { name: 'Riverbend Property Care', phone: '555-0142', email: 'help@example.com', note: 'Call any time for a leak, no heat or no power. Text for anything else.' },
       notes: 'Trash goes out Monday night; recycling every other Thursday.' },
-    { id: 'water-shutoff', name: 'Main water shutoff', kind: 'water', emergency: true, order: 1, where: 'Basement, left of the pressure tank, at waist height.',
+    { id: 'water-shutoff', name: 'Main water shutoff', kind: 'water', emergency: true, order: 1, where: 'Basement, left of the pressure tank, at waist height.', photo: 'sample-shutoff.jpg',
       summary: 'Turns off water to the whole house. Use it for any leak you can\'t stop at the fixture.',
       steps: 'Turn the red lever a quarter turn, so it sits across the pipe.\nOpen the lowest faucet in the house to drain the pipes.\nCall the number below.',
       facts: [['Valve', '1" ball valve'], ['Also', 'The well pump has its own breaker, number 14']], warn: 'Turn the water heater off at the panel if the water will be off for more than a day.' },
@@ -134,7 +143,7 @@ export const SAMPLE = {
 // A page from an import file, checked before it goes in: { rec } (its id as a sticker reads it, its details as
 // [label, value] pairs) or { why }, naming it for the toast.
 const PAGE_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
-const TEXT = ['title', 'intro', 'notes', 'name', 'where', 'kind', 'summary', 'steps', 'care', 'warn', 'manual', 'call'];
+const TEXT = ['title', 'intro', 'notes', 'name', 'where', 'kind', 'summary', 'steps', 'care', 'warn', 'manual', 'call', 'photo'];
 export function checkPage(d) {
   if (!d || typeof d !== 'object' || Array.isArray(d)) return { why: 'a line that isn\'t a page' };
   const id = typeof d.id === 'string' ? d.id.trim().toLowerCase() : '';

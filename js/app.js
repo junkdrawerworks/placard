@@ -5,7 +5,7 @@ import { Ledger, watchConnectLinks, publicRead, publicReport, refusal, importSum
 import { tagUrl } from './kit/tags.js';
 import { nfcPanel } from './kit/panel.js';
 import { LEDGER_URL } from './config.js';
-import { KINDS, STARTER, SAMPLE, parseFacts, factsText, lines, mergeImport, dial, splitLinks, reachBy, groupReports, clock, timeSpan } from './starter.js';
+import { KINDS, STARTER, SAMPLE, parseFacts, factsText, lines, mergeImport, dial, splitLinks, reachBy, groupReports, clock, timeSpan, photoName } from './starter.js';
 
 const params = new URLSearchParams(location.search);
 const demo = params.has('demo');
@@ -107,6 +107,7 @@ function readPublic() {
       const docs = await publicRead(LEDGER_URL, 'placard', 'site');
       copyAt = Date.now(); jset(PUBLIC, { at: copyAt, docs });
       site = pages(docs); siteError = ''; stale = '';
+      warmPhotos();
     } catch (e) {
       // no signal (or one bar that never answers), or a phone online whose read failed: the address in config.js
       // is wrong or its deployment gone, which a signal won't mend
@@ -119,6 +120,20 @@ function readPublic() {
   return reading;
 }
 const failing = () => !owner() && !!LEDGER_URL && (!!stale || siteError === 'offline' || siteError === 'noload');
+// After a tenant's good read, every page's photo the phone hasn't kept yet is asked for once, through the service worker,
+// which keeps it: a tap on another sticker later, with no signal in the basement, still shows its picture. It waits until
+// the worker runs the page (a first visit's photos go at the next one), and asks nothing on a phone saving data.
+async function warmPhotos() {
+  if (demo || !('serviceWorker' in navigator) || !('caches' in window) || navigator.connection?.saveData) return;
+  try {
+    await navigator.serviceWorker.ready;
+    if (!navigator.serviceWorker.controller) await new Promise(r => navigator.serviceWorker.addEventListener('controllerchange', r, { once: true }));
+    for (const s of systems()) {
+      const n = photoName(s.photo);
+      if (n && !(await caches.match('photos/' + n))) await fetch('photos/' + n).catch(() => {});
+    }
+  } catch {}
+}
 window.addEventListener('online', () => { if (failing()) readPublic(); });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && failing()) readPublic(); });
 const tryAgain = () => h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn ghost', onclick: e => {
@@ -194,6 +209,27 @@ function renderHome() {
   ];
 }
 
+// A page's photo, under Where: tap it for the whole picture. One that doesn't load (not in the repo yet, or not kept on a
+// phone with no signal) goes from a tenant's page; the owner is told which file it was.
+function photoFig(s) {
+  const n = photoName(s.photo);
+  if (!n) return null;
+  const src = 'photos/' + n, alt = `${s.name}${s.where ? ': ' + s.where : ''}`;
+  const img = h('img', { src, alt, decoding: 'async' });
+  const fig = h('figure', { class: 'photo' }, h('button', { type: 'button', class: 'photo-btn', 'aria-label': `The photo of ${s.name}, larger`, onclick: () => enlarge(src, alt) }, img));
+  img.addEventListener('error', () => fig.replaceWith(owner() ? h('p', { class: 'msg bad photo-missing' }, `${src} didn't load. Is it in the photos folder of the placard repo?`) : ''));
+  return fig;
+}
+function enlarge(src, alt) {
+  const dlg = h('dialog', { class: 'photo-view', 'aria-label': alt },
+    h('img', { src, alt }),
+    h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn', onclick: () => dlg.close() }, 'Close')));
+  dlg.addEventListener('click', e => { if (e.target === dlg || e.target.tagName === 'IMG') dlg.close(); });
+  dlg.addEventListener('close', () => setTimeout(() => dlg.remove(), 50));
+  document.body.append(dlg);
+  dlg.showModal();
+}
+
 // A link or a phone number in a page's text, tappable (text nodes and links only, never HTML).
 const linked = t => splitLinks(t).map(p => !p.href ? p.text : p.href.startsWith('tel:') ? h('a', { href: p.href }, p.text)
   : h('a', { href: p.href, target: '_blank', rel: 'noopener' }, p.text));
@@ -208,6 +244,7 @@ function renderSystem(s) {
     h('div', { class: 'tape-wrap' }, h('span', { class: 'tape-cap' }, KINDS.find(k => k[0] === group(s))[1]), h('div', { class: 'tape' }, s.name)),
     lifeSafety(s) ? fireLine() : null,
     s.where ? h('p', { class: 'where' }, h('b', {}, 'Where: '), s.where) : null,
+    photoFig(s),
     s.summary ? h('p', { class: 'lead' }, s.summary) : null,
     s.warn ? h('div', { class: 'notice warn' }, h('p', {}, s.warn)) : null,
     steps.length ? h('section', {}, h('h2', {}, 'What to do'), h('ol', { class: 'steps' }, steps.map(l => h('li', {}, linked(l))))) : null,
@@ -216,7 +253,7 @@ function renderSystem(s) {
     s.care ? h('section', {}, h('h2', {}, 'Looking after it'), lines(s.care).map(l => h('p', {}, linked(l)))) : null,
     s.manual ? h('p', {}, h('a', { class: 'btn ghost', href: s.manual, target: '_blank', rel: 'noopener' }, 'The manual')) : null,
     // the starter's pages are blank until the owner walks the house: say so rather than show an empty page
-    !(s.where || s.summary || s.warn || steps.length || facts.length || s.care || s.manual) ? h('p', { class: 'empty' }, 'Nothing written here yet. Call or report below.') : null,
+    !(s.where || photoName(s.photo) || s.summary || s.warn || steps.length || facts.length || s.care || s.manual) ? h('p', { class: 'empty' }, 'Nothing written here yet. Call or report below.') : null,
     contactCard(hs.contact, { first: numberOf(s) }),
     reportButton(s, 'Report a problem or log a visit'),
     owner() ? ownerTools(s) : null,
@@ -426,18 +463,21 @@ const tenantNotice = () => {
 async function editSystem(s) {
   const exists = !!(s?._updated && sys(s.id));   // a sticker page's stub has no saved time: always a new page
   const made = v => ({ ...(s || {}), id: s?.id || uniqueId(v.name), name: v.name, where: v.where, kind: v.kind, emergency: v.emergency === 'yes', summary: v.summary,
-    steps: v.steps, facts: parseFacts(v.facts), care: v.care, warn: v.warn, manual: v.manual, order: Number(v.order) || 99,
+    steps: v.steps, facts: parseFacts(v.facts), care: v.care, warn: v.warn, manual: v.manual, order: Number(v.order) || 99, photo: photoName(v.photo) || '',
     ...(v.call != null ? { call: v.call } : {}) });
   // a Save that can't go keeps the sheet open with everything typed: too long, an id the ledger refuses, or the ledger
   // not heard from yet
   const check = v => {
     if (!exists && !ledger.synced('site')) return STILL_LOADING;
     if (s?.id && FRONT.has(s.id)) return `"${s.id}" is the front page's own address: pick another.`;
+    if (photoName(v.photo) === null) return { line: 'A photo is the name of a file in the photos folder, like water-shutoff.jpg (a .jpg, .png or .webp).', field: 'photo' };
     return refusedPage(made(v));
   };
   const v = await sheet({ title: exists ? 'Edit ' + s.name : 'New system', danger: exists ? 'Delete' : null, check, fields: [
     { name: 'name', label: 'Name', value: s?.name, required: true },
     { name: 'where', label: 'Where it is', value: s?.where, placeholder: 'Basement, left of the stairs' },
+    { name: 'photo', label: 'Photo', value: s?.photo, placeholder: 'water-shutoff.jpg',
+      hint: 'A file in the photos folder of the placard repo: about 1200 px wide, under 200 KB, and nothing showing the house number or street.' },
     { name: 'kind', label: 'Group', type: 'select', value: s?.kind || 'other',
       options: s?.kind && group(s) !== s.kind ? [...KINDS, [s.kind, `${s.kind} (shown under Everything else)`]] : KINDS },
     { name: 'emergency', label: 'Show under "In an emergency"', type: 'select', value: s?.emergency ? 'yes' : 'no', options: [['no', 'No'], ['yes', 'Yes']] },
