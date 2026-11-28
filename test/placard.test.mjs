@@ -128,3 +128,10 @@ test('Reports: a phone number or an email in a report\'s contact, and one card f
   assert.deepEqual([timeSpan(t(2, 19), t(2, 31)), timeSpan(t(11, 58), t(12, 10)), timeSpan(t(9, 0), t(9, 0)), timeSpan(t(12, 5), t(13, 0))],
     ['2:19-2:31 am', '11:58 am-12:10 pm', '9:00 am', '12:05-1:00 pm']);
 });
+
+test('an import with a page under "home" (the front page\'s other address) skips it and says so, rather than counting a page no one sees', () => {
+  const { puts, res } = mergeImport([{ id: 'home', name: 'Home', summary: 'Welcome' }, { id: 'Home', title: 'House manual' }, { id: 'house', title: 'House manual' },
+    { id: 'water-heater', name: 'Water heater' }], () => null, () => false);
+  assert.deepEqual(puts.map(d => d.id), ['house', 'water-heater']);
+  assert.deepEqual(res, { added: 2, filled: 0, kept: 0, gone: 0, skipped: ['"home" (the front page\'s own address; the front page is "house")', '"home" (the front page\'s own address; the front page is "house")'] });
+});

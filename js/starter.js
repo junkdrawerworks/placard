@@ -171,6 +171,9 @@ export function mergeImport(docs, here, gone) {
     const c = checkPage(d);
     if (c.why) { res.skipped.push(c.why); continue; }
     const id = c.rec.id;
+    // h/home is the front page's other sticker address, never a page of its own (the front page is the house doc): a
+    // page saved there would be counted as added and never shown, so it's skipped and named
+    if (id === 'home') { res.skipped.push('"home" (the front page\'s own address; the front page is "house")'); continue; }
     if (gone(id) && !mine[id]) { res.gone++; continue; }
     const was = mine[id] || here(id);
     const { doc, filled, kept } = was ? fillIn(was, c.rec, { facts: mergeFacts }) : { doc: c.rec, filled: [], kept: [] };
