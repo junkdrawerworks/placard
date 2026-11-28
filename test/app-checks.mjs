@@ -220,6 +220,11 @@ export async function fireChecks({ browser, base, assert }) {
     assert.equal(await page.locator('.tape-wrap + a.call-911').count(), 1, 'no 911 line under the page\'s name');
     assert.equal(await text('a.call-911'), FIRE);
     assert.deepEqual(await urgent(), ['Urgent? Call 911 now.', 'tel:911'], 'the alarm page\'s report form');
+    // its placeholder keeps the page's capitals: CO stays CO
+    await page.click('text=Report a problem');
+    assert.equal(await page.locator('dialog[open] #f-text').getAttribute('placeholder'), 'About the smoke and CO alarms…');
+    await page.click('dialog[open] >> text=Cancel');
+    await page.waitForSelector('dialog[open]', { state: 'detached' });
     // an emergency page in another group, and a page that isn't one: the house number, and no 911 line
     for (const [id, name] of [['panel-main', 'Main electrical panel'], ['water-heater', 'Water heater']]) {
       await page.goto(base + '#' + id);

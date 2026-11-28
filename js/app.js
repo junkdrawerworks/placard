@@ -332,13 +332,16 @@ function reportButton(s, label) {
   ];
 }
 
+// A page's name as it reads mid-sentence: 'smoke and CO alarms', 'air handler, upstairs' (a capital starting a word of
+// small letters goes; CO, HVAC and the like stay)
+const midSentence = name => String(name).replace(/\b(\p{Lu})(?=\p{Ll})/gu, c => c.toLowerCase());
 function report(s) {
   const key = s?.id || '', c = house().contact || {}, tel = dial(c.phone), was = draftOf(key) || {};
   // the urgent line: 911 on the smoke and CO alarm page (and any emergency page under Safety), the house contact elsewhere
   const urgent = lifeSafety(s) ? { tel: '911', said: 'Call 911 now' } : tel ? { tel, said: `Call ${c.phone} now` } : null;
   const field = (name, label, input, hint) => h('label', { class: 'field', for: 'f-' + name }, h('span', {}, label), input, hint ? h('small', {}, hint) : null);
   const kind = h('select', { id: 'f-kind', name: 'kind' }, ['Problem', 'Service visit', 'Question'].map(o => h('option', { value: o, selected: o === was.kind }, o)));
-  const text = h('textarea', { id: 'f-text', name: 'text', rows: 4, required: true, placeholder: s?.name ? `About the ${s.name.toLowerCase()}…` : '' });
+  const text = h('textarea', { id: 'f-text', name: 'text', rows: 4, required: true, placeholder: s?.name ? `About the ${midSentence(s.name)}…` : '' });
   const name = h('input', { id: 'f-name', name: 'name', type: 'text', autocomplete: 'off' });
   const contact = h('input', { id: 'f-contact', name: 'contact', type: 'text', autocomplete: 'off' });
   // The field only robots fill in: off the screen, out of the tab order and never autofilled. The ledger drops any
