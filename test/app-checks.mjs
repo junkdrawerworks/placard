@@ -671,6 +671,26 @@ async function keyboardChecks({ browser, base, assert }) {
   } finally { await ctx.close(); }
 }
 
+// A first tap on one bar: before any script has come, the page already says it's loading, and it asks for app.js's
+// modules at once (modulepreload) rather than one after another as each is read.
+async function firstWordsChecks({ browser, base, assert }) {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, serviceWorkers: 'block' });
+  try {
+    await ctx.route(base + 'js/config.js', configAs(LEDGER));
+    await ctx.route('https://script.google.com/**', r => r.abort());
+    const held = [], asked = [];
+    await ctx.route(/\.js$/, async r => { asked.push(r.request().url().replace(base, '')); await new Promise(res => held.push(res)); await r.continue(); });
+    const page = await ctx.newPage();
+    await page.goto(base + '#water-heater', { waitUntil: 'commit' });
+    await page.waitForSelector('#app .empty');
+    assert.equal(await page.locator('#app').textContent(), 'Loading the house manual…', 'a first tap shows a blank page until the scripts have come');
+    for (let i = 0; i < 30 && asked.length < 8; i++) await page.waitForTimeout(100);
+    assert.deepEqual(asked.sort(), ['js/app.js', 'js/config.js', 'js/kit/ledger.js', 'js/kit/nfc.js', 'js/kit/panel.js', 'js/kit/tags.js', 'js/kit/ui.js', 'js/starter.js'],
+      'the modules weren\'t all asked for before app.js came');
+    held.splice(0).forEach(res => res());
+  } finally { await ctx.close(); }
+}
+
 // A page opened from a sticker doesn't fetch the QR library; the QR sheet fetches it once, saying so meanwhile, then
 // draws the codes.
 async function qrLoadChecks({ browser, base, assert }) {
@@ -711,6 +731,7 @@ export async function appChecks({ page, ctx, base, assert, problems }) {
   await draftChecks({ browser: ctx.browser(), base, assert });
   await keyboardChecks({ browser: ctx.browser(), base, assert });
   await qrLoadChecks({ browser: ctx.browser(), base, assert });
+  await firstWordsChecks({ browser: ctx.browser(), base, assert });
   // Back from a page 40 rows down the owner's front page lands where the list was
   const { backKeepsPlace } = await import('./kit-checks.mjs');
   // every link, button and card header on the sample's screens is a 44 px target

@@ -95,3 +95,20 @@ test('the QR library is not on the page: only the screen that draws codes loads 
   const sw = await readFile(new URL('../sw.js', import.meta.url), 'utf8');
   assert.match(sw.match(/SHELL = \[([^\]]*)\]/)[1], /'js\/kit\/qrcode\.js'/, 'printing offline needs qrcode.js in the offline copy');
 });
+
+test('index.html asks for every module app.js imports at once, and says it is loading before any of them has come', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const page = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  const preloaded = [...page.matchAll(/<link rel="modulepreload" href="([^"]+)">/g)].map(m => m[1]).sort();
+  // app.js's static imports, and theirs, as paths from the site's root
+  const seen = new Set(), todo = ['js/app.js'];
+  while (todo.length) {
+    const file = todo.pop(), src = await readFile(new URL('../' + file, import.meta.url), 'utf8');
+    for (const m of src.matchAll(/^\s*(?:import|export)\s[^'"]*?from\s*['"](\.[^'"]+)['"]|^\s*import\s*['"](\.[^'"]+)['"]/gm)) {
+      const to = new URL(m[1] || m[2], 'https://x/' + file).pathname.slice(1);
+      if (!seen.has(to)) { seen.add(to); todo.push(to); }
+    }
+  }
+  assert.deepEqual(preloaded, [...seen].sort(), 'the modulepreload list in index.html isn\'t what app.js imports');
+  assert.match(page, /<div id="app"[^>]*><p class="empty">Loading the house manual…<\/p><\/div>/, 'a first tap shows a blank page until the scripts have come');
+});

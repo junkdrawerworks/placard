@@ -20,6 +20,15 @@
   <link rel="preload" href="fonts/barlow-400.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="css/kit.css">
   <link rel="stylesheet" href="css/app.css">
+  <!-- every module app.js imports, asked for at once instead of one after another as each is read (test/placard.test.mjs
+       checks this list against app.js): a tenant's first tap on one bar waits for one round trip, not three -->
+  <link rel="modulepreload" href="js/kit/ui.js">
+  <link rel="modulepreload" href="js/kit/ledger.js">
+  <link rel="modulepreload" href="js/kit/tags.js">
+  <link rel="modulepreload" href="js/kit/panel.js">
+  <link rel="modulepreload" href="js/kit/nfc.js">
+  <link rel="modulepreload" href="js/config.js">
+  <link rel="modulepreload" href="js/starter.js">
 </head>
 <body>
 <noscript>Placard needs JavaScript to show the house manual.</noscript>
@@ -29,7 +38,7 @@
     <a class="btn ghost" id="edit-link" href="#/owner" hidden>Edit</a>
   </header>
   <div class="notice" id="demo-note" hidden><p><b>Sample house.</b> Made-up pages to try Placard with. Nothing you change is kept.</p></div>
-  <div id="app" aria-live="polite"></div>
+  <div id="app" aria-live="polite"><p class="empty">Loading the house manual…</p></div>
   <footer class="jd-foot">
     <a href="https://junkdrawer.works/">Part of junkdrawer.works</a><span aria-hidden="true">·</span><a href="https://junkdrawer.works/privacy.html">Privacy</a>
   </footer>
