@@ -899,15 +899,31 @@ export async function ownerChecks({ browser, base, assert }) {
     assert.deepEqual(await spareLine(), [`Spare locked ${day}.`]);
     assert.equal((await doc()).locked, lockedOn, 'locking the spare moved the page\'s locked day');
     assert.ok((await doc()).spareLocked, 'the spare\'s lock was not saved');
-    // the question closed without an answer (Back) counts as a spare: the page stays as it was, locked
+    // the question closed without an answer (Back) counts as a replacement: the page reads written, not locked yet (no
+    // new spare noted), until a sticker is locked, which turns it green again whichever it was
     await page.click('.nfc >> text=Replace or make a spare');
     await page.evaluate(() => window.__nfc.hold());
     await page.click('.nfc >> text=Write sticker');
     await ask.waitFor();
     await page.keyboard.press('Escape');
+    await page.waitForFunction(() => /not locked yet\.$/.test(document.querySelector('.nfc .state')?.textContent));
+    assert.deepEqual([(await doc()).locked, !!(await doc()).spareLocked], [null, true], 'a closed question left the page locked, or noted a new spare');
+    assert.deepEqual(await spareLine(), [`Spare locked ${day}.`]);
+    assert.equal(await said(), 'Written. Tap it with the phone to check, then lock it.');
+    assert.equal(await page.locator('.nfc button', { hasText: /^(Write sticker|Lock sticker)$/ }).count(), 2);
+    await page.click('.nfc >> text=Lock sticker');
+    await page.click('dialog >> text=Lock it');
+    await page.waitForFunction(() => window.__nfc.locks === 3);
+    await page.waitForFunction(() => /^Locked /.test(document.querySelector('.nfc .state')?.textContent));
+    assert.ok((await doc()).locked, 'locking the new sticker didn\'t lock the page');
+    // a spare written and not locked yet: the panel stays open on Write and Lock, for the lock that comes next
+    await page.click('.nfc >> text=Replace or make a spare');
+    await page.evaluate(() => window.__nfc.hold());
+    await page.click('.nfc >> text=Write sticker');
+    await ask.waitFor();
+    await ask.locator('button', { hasText: 'A spare to keep' }).click();
     await page.waitForFunction(() => /^Spare written/.test(document.querySelector('.nfc .msg.spare')?.textContent));
     assert.match(await state(), /^Locked /);
-    // a spare written and not locked yet: the panel stays open on Write and Lock, for the lock that comes next
     assert.equal(await page.locator('.nfc button', { hasText: /^(Write sticker|Lock sticker)$/ }).count(), 2);
     // a replacement: written and not locked until it is, as before
     await page.evaluate(() => window.__nfc.hold());
@@ -928,14 +944,14 @@ export async function ownerChecks({ browser, base, assert }) {
     assert.equal(await front.locator('.url').textContent(), 'https://tag.junkdrawer.works/h/house');
     await page.evaluate(() => window.__nfc.hold());
     await front.locator('text=Write sticker').click();
-    await page.waitForFunction(() => window.__nfc.writes.length === 5);
+    await page.waitForFunction(() => window.__nfc.writes.length === 6);
     await page.waitForFunction(() => /not locked yet\.$/.test(document.querySelector('.front-tag .state')?.textContent));
     await front.locator('text=Lock sticker').click();
     // the front page can't be deleted: OVERRIDES, as its locked line says
     assert.equal(await page.locator('dialog[open] form > p').textContent(), 'Locking is permanent: nobody can rewrite it, you included. Do it only after a tap opens the right page. '
       + 'To send it somewhere else, add it to OVERRIDES in Switchboard\'s 404.html.');
     await page.click('dialog >> text=Lock it');
-    await page.waitForFunction(() => window.__nfc.locks === 3);
+    await page.waitForFunction(() => window.__nfc.locks === 4);
     await page.waitForFunction(() => /^Locked /.test(document.querySelector('.front-tag .state')?.textContent));
     const hs = await page.evaluate(() => window.__placard.ledger.doc('site', 'house'));
     assert.ok(hs.tagged && hs.locked, 'the front page sticker was not saved as written and locked');
