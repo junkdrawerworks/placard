@@ -17,7 +17,8 @@ const fakeNfc = () => {
 // A phone on a published manual: js/config.js as served carries a ledger address (published: true), and a pretend
 // ledger answers it with the sample house. L.down: every request fails; L.delay: each waits that long (Google waking
 // the script); L.hang: Google takes each request and never answers (one bar); L.emailed: what a report's answer says;
-// L.dropPub: how many of the next tenant reads (pub) drop their connection; L.repeat: a report's answer says the same
+// L.dropPub: how many of the next tenant reads (pub) drop their connection; L.pubGone: the manual's tab renamed or
+// deleted in the sheet (the ledger says so); L.repeat: a report's answer says the same
 // words went from that page at this time (an ISO string), as the ledger does for a second send within the hour. The service worker is off, so every request reaches the routes.
 // published: the address put in js/config.js (true: LEDGER). OTHER is another deployment that answers with the same
 // pages; any other script.google.com address answers 404, as a mistyped or archived one does.
@@ -35,6 +36,7 @@ async function phone(browser, base, { published = true, dark = false } = {}) {
     const req = r.request(), json = o => r.fulfill({ contentType: 'application/json', body: JSON.stringify(o) });
     if (!req.url().startsWith(LEDGER) && !req.url().startsWith(OTHER)) return r.fulfill({ status: 404, contentType: 'text/html', body: '<!DOCTYPE html><title>Page Not Found</title>' });
     if (req.method() === 'GET' && L.dropPub > 0 && new URL(req.url()).searchParams.get('op') === 'pub') { L.dropPub--; return r.abort('connectionreset'); }
+    if (req.method() === 'GET' && L.pubGone && new URL(req.url()).searchParams.get('op') === 'pub') return json({ ok: false, error: 'the sheet has no placard.site tab' });
     if (req.method() === 'GET') return json(new URL(req.url()).searchParams.get('op') === 'pub' ? { ok: true, docs: L.site } : { ok: true, app: 'switchboard-ledger', version: '1.1' });
     const b = JSON.parse(req.postData() || '{}');
     if (b.op === 'report') { L.reports.push(b.doc); return json(L.repeat ? { ok: true, emailed: false, repeat: true, firstAt: L.repeat } : { ok: true, emailed: L.emailed }); }
@@ -199,6 +201,15 @@ export async function retryChecks({ browser, base, assert }) {
     await offline(false);
     await page.waitForFunction(() => !document.querySelector('.stale'), null, { timeout: 2000 });
     assert.equal(await page.locator('.contact a[href^="tel:"]').getAttribute('href'), 'tel:5550999');
+    // the manual's tab renamed or deleted in the sheet: the ledger says so, and the phone keeps its copy (an answer with
+    // no pages would have replaced it with an empty manual)
+    L.pubGone = true;
+    await page.reload();
+    await page.waitForSelector('.stale');
+    assert.match(await text('.stale p'), /^The latest didn't load\. This is the copy saved today at \d{1,2}:\d\d [ap]m\. A number may have changed since\.$/);
+    assert.equal(await page.locator('.tape').textContent(), 'Water heater', 'the kept copy isn\'t shown');
+    assert.ok(await page.evaluate(() => JSON.parse(localStorage.getItem('placard.public')).docs.length > 1), 'the kept copy was emptied');
+    L.pubGone = false;
     // a phone with signal whose read fails (config.js wrong, the deployment gone) isn't told it has no signal
     L.down = true;
     await page.reload();
