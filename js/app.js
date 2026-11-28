@@ -486,7 +486,7 @@ async function editSystem(s) {
     { name: 'name', label: 'Name', value: s?.name, required: true },
     { name: 'where', label: 'Where it is', value: s?.where, placeholder: 'Basement, left of the stairs' },
     { name: 'photo', label: 'Photo', value: s?.photo, placeholder: 'water-shutoff.jpg',
-      hint: 'A file in the photos folder of the placard repo: about 1200 px wide, under 200 KB, and nothing showing the house number or street.' },
+      hint: 'A file in the photos folder of the placard repo: about 1200 px wide, under 200 KB, nothing showing the house number or street, and no location saved in the file.' },
     { name: 'kind', label: 'Group', type: 'select', value: s?.kind || 'other',
       options: s?.kind && group(s) !== s.kind ? [...KINDS, [s.kind, `${s.kind} (shown under Everything else)`]] : KINDS },
     { name: 'emergency', label: 'Show under "In an emergency"', type: 'select', value: s?.emergency ? 'yes' : 'no', options: [['no', 'No'], ['yes', 'Yes']] },

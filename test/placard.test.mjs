@@ -229,3 +229,16 @@ test('an import never turns a page into a sticker sent to another page, nor adds
   const copy = mergeImport([{ id: 'attic', name: 'Attic fan', to: 'house' }], () => null, id => id === 'attic', { back: true });
   assert.deepEqual([copy.back, copy.puts, copy.res.skipped], [[], [], ['"attic" (a sticker sent to another page, not a page)']]);
 });
+
+test('no photo in the repo says where it was taken: no Exif or XMP block (where a phone keeps the location) in a JPEG', async () => {
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const dir = new URL('../photos/', import.meta.url), jpegs = readdirSync(dir).filter(f => /\.jpe?g$/i.test(f));
+  assert.ok(jpegs.length > 0);
+  for (const f of jpegs) {
+    const b = readFileSync(new URL(f, dir));
+    assert.ok(b[0] === 0xff && b[1] === 0xd8, `photos/${f} isn't a JPEG`);
+    // the blocks before the picture itself: FF, a marker, a two-byte length; APP1 (E1) holds Exif or XMP
+    for (let i = 2; i + 4 <= b.length && b[i] === 0xff && b[i + 1] !== 0xda && b[i + 1] !== 0xd9; i += 2 + b.readUInt16BE(i + 2))
+      assert.notEqual(b[i + 1], 0xe1, `photos/${f} has an Exif or XMP block, which can hold where it was taken: save it again without it`);
+  }
+});

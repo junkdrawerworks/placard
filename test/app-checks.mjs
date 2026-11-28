@@ -390,6 +390,8 @@ export async function photoChecks({ browser, base, assert }) {
     // the owner names it: a link, or a path out of the folder, is turned down with the sheet kept open
     await page.click('text=Edit this page');
     assert.equal(await page.inputValue('#f-photo'), 'sample-shutoff.jpg');
+    // a phone saves where a photo was taken in the file, and the repo is public: the hint says to leave that out
+    assert.match(await page.locator('label[for=f-photo] small').textContent(), /, and no location saved in the file\.$/);
     for (const bad of ['https://example.com/valve.jpg', '../js/app.js', 'valve.pdf', 'photos/sub/valve.jpg']) {
       await page.fill('#f-photo', bad);
       await page.click('dialog[open] button[type=submit]');
