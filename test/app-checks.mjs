@@ -23,12 +23,24 @@ const fakeNfc = () => {
 // published: the address put in js/config.js (true: LEDGER). OTHER is another deployment that answers with the same
 // pages; any other script.google.com address answers 404, as a mistyped or archived one does.
 const OTHER = 'https://script.google.com/macros/s/AKfyOTHER/exec';
+// js/config.js as served, with url in place of whatever address the file holds.
+const configAs = url => async r => r.fulfill({ contentType: 'text/javascript',
+  body: (await readFile(join(root, 'js/config.js'), 'utf8')).replace(/LEDGER_URL = '[^']*'/, `LEDGER_URL = '${url}'`) });
+// The same through the test's own server, for the page the offline checks use: its answer as it is (its ETag, held or
+// dropped with the rest, a next release's changes), with the address swapped.
+const configThrough = url => async r => {
+  let res;
+  try { res = await r.fetch(); } catch { return r.abort('internetdisconnected').catch(() => {}); }
+  if (res.status() !== 200) return r.fulfill({ response: res });
+  return r.fulfill({ response: res, body: (await res.text()).replace(/LEDGER_URL = '[^']*'/, `LEDGER_URL = '${url}'`) });
+};
 async function phone(browser, base, { published = true, dark = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true,
     colorScheme: dark ? 'dark' : 'light', serviceWorkers: 'block' });
   const L = { down: false, delay: 0, hang: false, held: [], emailed: true, dropPub: 0, reports: [], puts: [], site: structuredClone(SAMPLE['placard.site']) };
-  if (published) await ctx.route(base + 'js/config.js', async r => r.fulfill({ contentType: 'text/javascript',
-    body: (await readFile(join(root, 'js/config.js'), 'utf8')).replace("LEDGER_URL = ''", `LEDGER_URL = '${published === true ? LEDGER : published}'`) }));
+  // whatever address js/config.js holds (empty quotes, or the owner's own once it's published), this phone gets the
+  // test's: LEDGER, another, or none (published false)
+  await ctx.route(base + 'js/config.js', configAs(published === true ? LEDGER : published || ''));
   await ctx.route('https://script.google.com/**', async r => {
     if (L.hang) { await new Promise(res => L.held.push(res)); return r.abort().catch(() => {}); }   // taken, never answered
     if (L.delay) await new Promise(res => setTimeout(res, L.delay));
@@ -680,7 +692,16 @@ async function qrLoadChecks({ browser, base, assert }) {
   } finally { await ctx.close(); }
 }
 
-export async function appChecks({ page, ctx, base, assert }) {
+export async function appChecks({ page, ctx, base, assert, problems }) {
+  // The page the offline checks use is a tenant's on an unpublished manual, whatever address js/config.js holds (yours,
+  // once Placard is published: Part 1 of its guide), so it never asks Google. Its first load, before these checks, read
+  // the file as it is: what that asked of Google is left out, and its offline copy is made again.
+  await ctx.route(base + 'js/config.js', configThrough(''));
+  if (!/LEDGER_URL = ''/.test(await readFile(join(root, 'js/config.js'), 'utf8'))) {
+    await page.evaluate(async () => { for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); for (const k of await caches.keys()) await caches.delete(k); });
+    await page.reload();
+    for (let i = problems.length - 1; i >= 0; i--) if (/script\.google\.com|ERR_NAME_NOT_RESOLVED/.test(problems[i])) problems.splice(i, 1);
+  }
   await tenantChecks({ browser: ctx.browser(), base, assert });
   await ownerChecks({ browser: ctx.browser(), base, assert });
   await secondOwnerChecks({ browser: ctx.browser(), base, assert });
