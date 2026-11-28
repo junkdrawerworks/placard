@@ -528,7 +528,7 @@ function renderPrint() {
 
 // One card for the same words from the same page on one day (groupReports): sent again, or kept by the ledger as a
 // repeat, it says how many times and when, and one Mark handled does them all. A phone number left in a report gets
-// Call and Text, an email address Email.
+// Call and Text, an email address Email, each with the person's name when the card holds more than one person's.
 function renderReports() {
   const cards = groupReports(ledger.docs('reports'));
   const handle = c => { const at = Date.now(); for (const r of c.reports) if (r.status !== 'handled') ledger.put('reports', { ...r, status: 'handled', handled: today(), handledAt: at }); render(); };
@@ -537,7 +537,9 @@ function renderReports() {
     cards.length ? h('ul', { class: 'list' }, cards.map(c => {
       const r = c.first, n = c.reports.length, at = Date.parse(r.at);
       const who = [...new Set(c.reports.map(x => [x.name, x.contact].filter(Boolean).join(' · ')).filter(Boolean))];
-      const reach = [...new Map(c.reports.map(x => reachBy(x.contact)).filter(x => x.tel || x.email).map(x => [x.tel + ' ' + x.email, x])).values()];
+      // more than one person's number or address on a card (two roommates, the same words): each button names whose
+      const reach = [...new Map(c.reports.map(x => ({ ...reachBy(x.contact), who: String(x.name || '').trim() })).filter(x => x.tel || x.email).map(x => [x.tel + ' ' + x.email, x])).values()];
+      const named = (verb, x, fallback) => reach.length > 1 ? `${verb} ${x.who || fallback}` : verb;
       return h('li', { class: 'card report' + (c.handled ? ' dim' : '') },
         h('p', {}, h('span', { class: 'chip ' + (c.handled ? '' : 'warn') }, r.kind || 'Note'), ' ', h('b', {}, r.systemName || 'General'), ' ',
           h('small', {}, !Number.isFinite(at) ? '' : n > 1 ? dayShort(at) : stampText(at))),
@@ -545,8 +547,8 @@ function renderReports() {
         n > 1 ? h('p', { class: 'muted times' }, `Sent ${n} times, ${timeSpan(at, Date.parse(c.last.at))}`) : null,
         h('p', { class: 'muted' }, who.join('; ') || 'No name left'),
         reach.length || !c.handled ? h('div', { class: 'btns' },
-          reach.map(x => [x.tel ? h('a', { class: 'btn ghost', href: 'tel:' + x.tel }, 'Call') : null, x.tel ? h('a', { class: 'btn ghost', href: 'sms:' + x.tel }, 'Text') : null,
-            x.email ? h('a', { class: 'btn ghost', href: 'mailto:' + x.email }, 'Email') : null]),
+          reach.map(x => [x.tel ? h('a', { class: 'btn ghost', href: 'tel:' + x.tel }, named('Call', x, x.tel)) : null, x.tel ? h('a', { class: 'btn ghost', href: 'sms:' + x.tel }, named('Text', x, x.tel)) : null,
+            x.email ? h('a', { class: 'btn ghost', href: 'mailto:' + x.email }, named('Email', x, x.email)) : null]),
           !c.handled ? h('button', { type: 'button', class: 'btn ghost', onclick: () => handle(c) }, 'Mark handled') : null) : null);
     })) : h('p', { class: 'empty' }, 'No reports yet.'),
   ];

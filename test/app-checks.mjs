@@ -897,6 +897,18 @@ async function reportsChecks(page, base, assert) {
   await page.waitForFunction(() => document.querySelectorAll('.report').length === 3);
   assert.deepEqual((await cards()).map(c => [c.text, c.times, c.handled]), [['Which day is trash?', '', false], ['Small drip from the valve on the side.', '', false],
     ['Small drip from the valve on the side.', `Sent 3 times, ${span}`, true]], 'a report after the first was handled joined its card');
+  // two people with the same words: each button names whose number or address it is
+  await page.evaluate(() => { const { ledger, render } = window.__placard, t = m => new Date(2026, 10, 21, 10, m).toISOString();
+    ledger.put('reports', { id: 'r6', system: 'well-tank', systemName: 'Well tank', kind: 'Problem', name: 'Pat', contact: '555-0123', text: 'No water at all', at: t(0), status: 'new' });
+    ledger.put('reports', { id: 'r7', system: 'well-tank', systemName: 'Well tank', kind: 'Problem', name: 'Sam', contact: 'sam@example.com, 555-0199', text: 'No water at all', at: t(5), status: 'new' });
+    ledger.put('reports', { id: 'r8', system: 'well-tank', systemName: 'Well tank', kind: 'Problem', contact: 'upstairs.tenant.longname.flat2@exampleproperty.com', text: 'no water at all', at: t(9), status: 'new' });
+    render(); });
+  await page.waitForSelector('.report >> text=No water at all');
+  assert.deepEqual((await cards())[0].links, [['Call Pat', 'tel:5550123'], ['Text Pat', 'sms:5550123'], ['Call Sam', 'tel:5550199'], ['Text Sam', 'sms:5550199'],
+    ['Email Sam', 'mailto:sam@example.com'], ['Email upstairs.tenant.longname.flat2@exampleproperty.com', 'mailto:upstairs.tenant.longname.flat2@exampleproperty.com']],
+  'two people\'s Call buttons look the same');
+  assert.deepEqual(await page.locator('.report').first().evaluate(l => [...l.querySelectorAll('.btn')].filter(b => b.getBoundingClientRect().right > l.getBoundingClientRect().right).map(b => b.textContent)),
+    [], 'a button runs off its card');
 }
 
 // On Letter with 0.4 in margins the page is 739 px across: the printed thing fits inside it, nothing else prints, and a
