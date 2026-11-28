@@ -1,6 +1,6 @@
 // Placard: a house manual on stickers. Tenants tap a sticker and get that system's page with no app and no sign-in;
 // the owner, connected to the ledger, edits the pages, writes and locks the stickers and reads the reports.
-import { $, h, mount, toast, sheet, confirmSheet, route, go, stampText, qrSvg, today, held, sampleLink, onRoute } from './kit/ui.js';
+import { $, h, mount, toast, sheet, confirmSheet, route, go, stampText, qrSvg, loadQr, today, held, sampleLink, onRoute } from './kit/ui.js';
 import { Ledger, watchConnectLinks, publicRead, publicReport, refusal, importSummary, STILL_LOADING } from './kit/ledger.js';
 import { tagUrl } from './kit/tags.js';
 import { nfcPanel } from './kit/panel.js';
@@ -494,8 +494,16 @@ function frontTag() {
       onWritten: () => mark({ tagged: today(), locked: null }), onLocked: () => mark({ locked: today() }) }));
 }
 
+// The QR library comes the first time the QR sheet opens (a tenant's tap never waits for it): until then a line says so,
+// and the sheet is drawn again when it has come.
+let qrAsked = false, qrFailed = false;
 function renderPrint() {
   const title = house().title || 'House manual';
+  if (!window.qrcode) {
+    if (!qrAsked) { qrAsked = true; loadQr().then(render, () => { qrFailed = true; render(); }); }
+    return [h('div', { class: 'no-print' }, h('p', { class: 'crumb' }, h('a', { href: '#/owner' }, '‹ Edit')), h('h2', {}, 'QR stickers'),
+      h('p', { class: 'empty', role: 'status' }, qrFailed ? 'The QR codes didn\'t load. Reload the page to try again.' : 'Making the QR codes…'))];
+  }
   const qrCard = (id, name, line, small) => h('div', { class: 'qr-card' },
     h('div', { class: 'qr', 'data-url': tagUrl('h', id), html: qrSvg(tagUrl('h', id), { size: 110 }) }),
     h('div', {}, h('b', {}, name), h('span', {}, line), small ? h('small', {}, small) : null));

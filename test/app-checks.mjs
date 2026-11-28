@@ -636,6 +636,27 @@ async function keyboardChecks({ browser, base, assert }) {
   } finally { await ctx.close(); }
 }
 
+// A page opened from a sticker doesn't fetch the QR library; the QR sheet fetches it once, saying so meanwhile, then
+// draws the codes.
+async function qrLoadChecks({ browser, base, assert }) {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, serviceWorkers: 'block' });
+  try {
+    const page = await ctx.newPage(), asked = [];
+    page.on('request', r => { if (r.url().includes('qrcode.js')) asked.push(r.url()); });
+    let release;
+    await ctx.route('**/js/kit/qrcode.js', async r => { await new Promise(res => { release = res; }); await r.continue(); });
+    await page.goto(base + '?demo#water-heater');
+    await page.waitForSelector('.tape >> text=Water heater');
+    assert.deepEqual(asked, [], 'a sticker\'s page fetched the QR library');
+    await page.evaluate(() => { location.hash = '#/print'; });
+    await page.waitForSelector('#app .empty >> text=Making the QR codes…');
+    for (let i = 0; i < 50 && !release; i++) await page.waitForTimeout(100);
+    release();
+    await page.waitForSelector('.qr-card svg');
+    assert.equal(asked.length, 1);
+  } finally { await ctx.close(); }
+}
+
 export async function appChecks({ page, ctx, base, assert }) {
   await tenantChecks({ browser: ctx.browser(), base, assert });
   await ownerChecks({ browser: ctx.browser(), base, assert });
@@ -645,6 +666,7 @@ export async function appChecks({ page, ctx, base, assert }) {
   await configChecks({ browser: ctx.browser(), base, assert });
   await draftChecks({ browser: ctx.browser(), base, assert });
   await keyboardChecks({ browser: ctx.browser(), base, assert });
+  await qrLoadChecks({ browser: ctx.browser(), base, assert });
   // Back from a page 40 rows down the owner's front page lands where the list was
   const { backKeepsPlace } = await import('./kit-checks.mjs');
   // every link, button and card header on the sample's screens is a 44 px target
