@@ -415,14 +415,50 @@ export async function ownerChecks({ browser, base, assert }) {
     assert.equal(await said(), 'Locked. It will open this page for good.');
     await page.waitForFunction(() => /^(Saved|Up to date)$/.test(document.querySelector('.sync')?.textContent));
     assert.ok(L.puts.at(-1).locked, 'the lock was not saved');
-    // a replacement (or a spare) for a locked sticker: a new one for the same page, written and not locked until it is
+    // another sticker for a locked page: once it's written the panel asks whether it replaces the one on the wall or is
+    // a spare to keep. A spare leaves the page locked, and says so under the locked line; locking it too says that.
+    const doc = () => page.evaluate(() => window.__placard.ledger.doc('site', 'water-heater'));
+    const lockedOn = (await doc()).locked, day = await page.evaluate(() => { const d = new Date(); return `${d.toLocaleString('en-US', { month: 'short' })} ${d.getDate()}, ${d.getFullYear()}`; });
+    const spareLine = () => page.locator('.nfc .msg.spare').allTextContents();
+    const ask = page.getByRole('dialog', { name: 'Replacing the one on the wall, or a spare to keep?' });
     await page.click('.nfc >> text=Replace or make a spare');
     await page.waitForSelector('.nfc >> text=Use a new blank sticker. The old one, wherever it is, keeps opening this page.');
     await page.evaluate(() => window.__nfc.hold());
     await page.click('.nfc >> text=Write sticker');
     await page.waitForFunction(() => window.__nfc.writes.length === 2);
+    await ask.waitFor();
+    assert.deepEqual(await ask.locator('button').allTextContents(), ['Replacing it', 'A spare to keep'], 'the question has more than its two answers');
+    await ask.locator('button', { hasText: 'A spare to keep' }).click();
+    await page.waitForFunction(() => document.querySelector('.nfc .msg.spare'));
+    assert.deepEqual(await spareLine(), [`Spare written ${day}.`]);
+    assert.match(await state(), /^Locked /, 'a spare unlocked the page');
+    assert.deepEqual([(await doc()).locked, (await doc()).spare, (await doc()).spareLocked], [lockedOn, await page.evaluate(() => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10)), null]);
+    assert.equal(await said(), 'Written. Tap it with the phone to check, then lock it.');
+    // locked too: the page keeps its own locked day, and the spare's line says it's locked
+    await page.click('.nfc >> text=Lock sticker');
+    await page.click('dialog >> text=Lock it');
+    await page.waitForFunction(() => window.__nfc.locks === 2);
+    await page.waitForFunction(() => /^Spare locked/.test(document.querySelector('.nfc .msg.spare')?.textContent));
+    assert.deepEqual(await spareLine(), [`Spare locked ${day}.`]);
+    assert.equal((await doc()).locked, lockedOn, 'locking the spare moved the page\'s locked day');
+    assert.ok((await doc()).spareLocked, 'the spare\'s lock was not saved');
+    // the question closed without an answer (Back) counts as a spare: the page stays as it was, locked
+    await page.click('.nfc >> text=Replace or make a spare');
+    await page.evaluate(() => window.__nfc.hold());
+    await page.click('.nfc >> text=Write sticker');
+    await ask.waitFor();
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => /^Spare written/.test(document.querySelector('.nfc .msg.spare')?.textContent));
+    assert.match(await state(), /^Locked /);
+    // a spare written and not locked yet: the panel stays open on Write and Lock, for the lock that comes next
+    assert.equal(await page.locator('.nfc button', { hasText: /^(Write sticker|Lock sticker)$/ }).count(), 2);
+    // a replacement: written and not locked until it is, as before
+    await page.evaluate(() => window.__nfc.hold());
+    await page.click('.nfc >> text=Write sticker');
+    await ask.waitFor();
+    await ask.locator('button', { hasText: 'Replacing it' }).click();
     await page.waitForFunction(() => /not locked yet\.$/.test(document.querySelector('.nfc .state')?.textContent));
-    assert.equal(await page.evaluate(() => window.__placard.ledger.doc('site', 'water-heater').locked), null);
+    assert.equal((await doc()).locked, null);
     assert.equal(await said(), 'Written. Tap it with the phone to check, then lock it.');
     assert.equal(await page.locator('.nfc button', { hasText: 'Lock sticker' }).count(), 1);
     // the front page's own sticker: h/house opens the whole manual, so the owner gets no Make this page there (it
@@ -435,11 +471,11 @@ export async function ownerChecks({ browser, base, assert }) {
     assert.equal(await front.locator('.url').textContent(), 'https://tag.junkdrawer.works/h/house');
     await page.evaluate(() => window.__nfc.hold());
     await front.locator('text=Write sticker').click();
-    await page.waitForFunction(() => window.__nfc.writes.length === 3);
+    await page.waitForFunction(() => window.__nfc.writes.length === 5);
     await page.waitForFunction(() => /not locked yet\.$/.test(document.querySelector('.front-tag .state')?.textContent));
     await front.locator('text=Lock sticker').click();
     await page.click('dialog >> text=Lock it');
-    await page.waitForFunction(() => window.__nfc.locks === 2);
+    await page.waitForFunction(() => window.__nfc.locks === 3);
     await page.waitForFunction(() => /^Locked /.test(document.querySelector('.front-tag .state')?.textContent));
     const hs = await page.evaluate(() => window.__placard.ledger.doc('site', 'house'));
     assert.ok(hs.tagged && hs.locked, 'the front page sticker was not saved as written and locked');

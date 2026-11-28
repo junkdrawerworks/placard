@@ -316,9 +316,12 @@ function ownerTools(s) {
   return h('section', { class: 'owner card' },
     h('h2', {}, 'Owner'),
     h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn', onclick: () => editSystem(s) }, 'Edit this page')),
-    // A new sticker written for a locked page (a replacement or a spare) is written, not locked, until it's locked too.
+    // A new sticker written for a locked page is a replacement (the page is then written, not locked, until it's locked
+    // too) or a spare to keep (the page stays locked; spare and spareLocked say when one was last written and locked).
     nfcPanel(tagUrl('h', s.id), { lock: true, label: 'Write sticker', sample: !!ledger.demo, tagged: s.tagged, locked: s.locked, name: s.name, nameOf: stickerName,
-      onWritten: () => save({ ...(sys(s.id) || s), tagged: today(), locked: null }), onLocked: () => save({ ...(sys(s.id) || s), locked: today() }) }));
+      spare: s.spare, spareLocked: s.spareLocked,
+      onWritten: () => save({ ...(sys(s.id) || s), tagged: today(), locked: null }), onLocked: () => save({ ...(sys(s.id) || s), locked: today() }),
+      onSpare: () => save({ ...(sys(s.id) || s), spare: today(), spareLocked: null }), onSpareLocked: () => save({ ...(sys(s.id) || s), spareLocked: today() }) }));
 }
 
 // Why the ledger can't take a page ('' when it can): over 45,000 characters, or an id it refuses. An edit sheet says it
@@ -503,7 +506,9 @@ function frontTag() {
     h('h2', {}, 'Front-door sticker'),
     h('p', { class: 'muted' }, 'Opens the whole manual. Put it inside the front door; its QR card is the first on the sheet.'),
     nfcPanel(tagUrl('h', 'house'), { lock: true, label: 'Write sticker', sample: !!ledger.demo, tagged: hs.tagged, locked: hs.locked, name: 'the front page', nameOf: stickerName,
-      onWritten: () => mark({ tagged: today(), locked: null }), onLocked: () => mark({ locked: today() }) }));
+      spare: hs.spare, spareLocked: hs.spareLocked,
+      onWritten: () => mark({ tagged: today(), locked: null }), onLocked: () => mark({ locked: today() }),
+      onSpare: () => mark({ spare: today(), spareLocked: null }), onSpareLocked: () => mark({ spareLocked: today() }) }));
 }
 
 // The QR library comes the first time the QR sheet opens (a tenant's tap never waits for it): until then a line says so,
