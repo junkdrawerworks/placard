@@ -1358,7 +1358,45 @@ export async function appChecks({ page, ctx, base, assert, problems }) {
   assert.equal(await page.locator('.qr-card').first().locator('span').textContent(), 'Tap or scan for the whole manual.');
   assert.equal(await page.locator('.qr-card .qr').first().getAttribute('data-url'), 'https://tag.junkdrawer.works/h/house');
   await printChecks(page, assert, '.qr-card');
+  await cardStepsChecks(page, base, assert);
   await reportsChecks(page, base, assert);
+}
+
+// An emergency page's QR card carries its first steps under the code (the 911 line first on a Safety page); the others
+// don't. Printed on Letter, it's two cards tall (108 mm, two rows of the sheet), and every card's words fit inside it,
+// a page with more steps than fit ending with a line saying there's more on the page.
+async function cardStepsChecks(page, base, assert) {
+  const cards = () => page.locator('.qr-card').evaluateAll(cs => cs.map(c => ({ name: c.querySelector('b').textContent, fire: c.querySelector('.qr-fire')?.textContent || '',
+    steps: [...c.querySelectorAll('.qr-steps li')].map(l => l.textContent), more: c.querySelector('.qr-more')?.textContent || '', call: c.querySelector('.qr-call')?.textContent || '' })));
+  const sample = Object.fromEntries(SAMPLE['placard.site'].map(d => [d.id, d]));
+  const steps = id => sample[id].steps.split('\n');
+  const call = 'Call Riverbend Property Care, 555-0142', none = { fire: '', steps: [], more: '', call: '' };
+  assert.deepEqual(await cards(), [
+    { name: 'House manual', ...none }, { name: 'Main water shutoff', fire: '', steps: steps('water-shutoff'), more: '', call },
+    { name: 'Water heater', ...none }, { name: 'Main electrical panel', fire: '', steps: steps('panel-main'), more: '', call },
+    { name: 'Air handler, upstairs', ...none }, { name: 'Garage door opener', ...none }],
+    'the cards\' steps (the sample\'s alarm page was deleted above, and the garage door imported)');
+  // the alarm page back, with more steps than a card holds, and long ones
+  await page.evaluate(s => { const { ledger, render } = window.__placard; ledger.put('site', { ...s, steps: [s.steps, 'Test every alarm once a month with its button: hold it until it sounds, then let go.',
+    'A CO alarm that sounds and stays on: open the windows, get everyone out and call 911 from outside; do not go back in until the fire department says so.',
+    'Never take the battery out to stop a chirp. Tell us and we will replace it the same day.'].join('\n') }); render(); }, sample['smoke-co']);
+  await page.waitForFunction(() => [...document.querySelectorAll('.qr-card b')].some(b => b.textContent === 'Smoke and CO alarms'));
+  const alarm = (await cards()).find(c => c.name === 'Smoke and CO alarms');
+  assert.deepEqual(alarm, { name: 'Smoke and CO alarms', fire: 'Fire, smoke or a CO alarm: get everyone out, then call 911.', steps: [...steps('smoke-co'),
+    'Test every alarm once a month with its button: hold it until it sounds, then let go.', 'A CO alarm that sounds and stays on: open the windows, get everyone out and call 911 from outside; do not go back in until the fire department says so.'],
+    more: '1 more on the page: tap or scan.', call });
+  for (const colorScheme of ['light', 'dark']) {
+    await page.setViewportSize({ width: 739, height: 1000 });
+    await page.emulateMedia({ media: 'print', colorScheme });
+    const got = await page.locator('.qr-card').evaluateAll(cs => cs.map(c => ({ name: c.querySelector('b').textContent, mm: Math.round(c.getBoundingClientRect().height / 96 * 25.4),
+      fits: c.scrollHeight <= c.clientHeight + 1 && [...c.querySelectorAll('*')].every(e => e.getBoundingClientRect().bottom <= c.getBoundingClientRect().bottom + 0.5), rows: getComputedStyle(c).gridRowStart })));
+    for (const c of got) {
+      const sos = ['Main water shutoff', 'Main electrical panel', 'Smoke and CO alarms'].includes(c.name);
+      assert.deepEqual([c.name, c.mm, c.fits, c.rows], [c.name, sos ? 108 : 52, true, sos ? 'span 2' : 'auto'], `${colorScheme}: the printed card for ${c.name}`);
+    }
+  }
+  await page.emulateMedia({ media: null, colorScheme: null });
+  await page.setViewportSize({ width: 390, height: 844 });
 }
 
 // The Reports screen: the same words from the same page on one day are one card that says how many times and when,

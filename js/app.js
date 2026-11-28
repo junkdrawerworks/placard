@@ -702,17 +702,32 @@ function renderPrint() {
     return [h('div', { class: 'no-print' }, h('p', { class: 'crumb' }, h('a', { href: '#/owner' }, '‹ Edit')), h('h2', {}, 'QR stickers'),
       h('p', { class: 'empty', role: 'status' }, qrFailed ? 'The QR codes didn\'t load. Reload the page to try again.' : 'Making the QR codes…'))];
   }
-  const qrCard = (id, name, line, small) => h('div', { class: 'qr-card' },
+  const qrCard = (id, name, line, small, s = null) => h('div', { class: 'qr-card' + (s?.emergency ? ' sos' : '') },
     h('div', { class: 'qr', 'data-url': tagUrl('h', id), html: qrSvg(tagUrl('h', id), { size: 110 }) }),
-    h('div', {}, h('b', {}, name), h('span', {}, line), small ? h('small', {}, small) : null));
+    h('div', {}, h('b', {}, name), h('span', {}, line), small ? h('small', {}, small) : null),
+    s?.emergency ? firstSteps(s) : null);
   return [
     h('div', { class: 'no-print' }, h('p', { class: 'crumb' }, h('a', { href: '#/owner' }, '‹ Edit')), h('h2', {}, 'QR stickers'),
       h('p', { class: 'muted' }, 'A backup beside each NFC sticker, for phones with NFC off. Print on label paper or plain paper, cut, and tape over with clear packing tape.'),
       h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn', onclick: () => print() }, 'Print'))),
     h('div', { class: 'qr-sheet' },
       qrCard('house', 'House manual', 'Tap or scan for the whole manual.', title === 'House manual' ? '' : title),
-      systems().map(s => qrCard(s.id, s.name, 'Tap a phone on the sticker, or scan, for what to do.', title))),
+      systems().map(s => qrCard(s.id, s.name, 'Tap a phone on the sticker, or scan, for what to do.', title, s))),
   ];
+}
+// An emergency page's card carries its first steps under the code, for a tenant in a basement with no signal whose
+// phone has never opened the manual: the 911 line first on a Safety page, then up to four steps, a line saying there's
+// more on the page, and the number its page's card shows ("Call the number below" is then true on paper too). The card
+// is twice the height of the others in print (two rows of the sheet).
+const CARD_STEPS = 4;
+function firstSteps(s) {
+  const steps = lines(s.steps), shown = steps.slice(0, CARD_STEPS), who = numberOf(s) || house().contact || {};
+  if (!shown.length && !lifeSafety(s)) return null;
+  return h('div', { class: 'qr-steps' + (shown.join('').length > 420 ? ' tight' : '') },
+    lifeSafety(s) ? h('p', { class: 'qr-fire' }, FIRE) : null,
+    shown.length ? h('ol', {}, shown.map(l => h('li', {}, l))) : null,
+    steps.length > CARD_STEPS ? h('p', { class: 'qr-more' }, `${steps.length - CARD_STEPS} more on the page: tap or scan.`) : null,
+    who.phone ? h('p', { class: 'qr-call' }, `Call ${who.name ? who.name + ', ' : ''}${who.phone}`) : null);
 }
 
 // One card for the same words from the same page on one day (groupReports): sent again, or kept by the ledger as a
@@ -806,4 +821,5 @@ onRoute(render);
 ledger.on(() => { const st = $('.sync'); if (st) { st.className = 'sync ' + ledger.state; st.textContent = ledger.statusText(); } });
 load();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
-window.__placard = { ledger, render, get site() { return site; } };
+// the tests' handle: render() redraws from the ledger's copy, as a sync does
+window.__placard = { ledger, render: () => { fromLedger(); render(); }, get site() { return site; } };
