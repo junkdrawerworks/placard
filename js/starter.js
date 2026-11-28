@@ -231,6 +231,12 @@ export function mergeImport(docs, here, gone, { back = false } = {}) {
     // h/home is the front page's other sticker address, never a page of its own (the front page is the house doc): a
     // page saved there would be counted as added and never shown, so it's skipped and named
     if (id === 'home') { res.skipped.push('"home" (the front page\'s own address; the front page is "house")'); continue; }
+    // Import brings pages. A sticker sent to another page (a record with "to", which only Delete makes) isn't one: it's
+    // skipped, so a file can't turn a page here into one, add one, or offer one back; a "to" that sends nowhere is dropped
+    if (c.rec.to != null) {
+      if (typeof c.rec.to === 'string' && c.rec.to.trim()) { res.skipped.push(`"${id}" (a sticker sent to another page, not a page)`); continue; }
+      delete c.rec.to;
+    }
     if (gone(id) && !mine[id]) {
       if (back && typeof c.rec.name === 'string' && c.rec.name.trim() && !refusal(c.rec) && !offer.some(d => d.id === id)) offer.push(c.rec); else res.gone++;
       continue;

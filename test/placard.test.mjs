@@ -201,3 +201,17 @@ test('a saved copy imported: pages deleted here since, or whose sticker was sent
   assert.equal(r.res.gone, 1, 'a page with no name can\'t come back, and counts as left out');
   assert.deepEqual(mergeImport(docs, id => here[id] || null, gone).back, [], 'an import file that isn\'t a copy offered a deleted page back');
 });
+
+test('an import never turns a page into a sticker sent to another page, nor adds one: a record with "to" is skipped and named', () => {
+  const here = { 'water-heater': { id: 'water-heater', name: 'Water heater', where: 'Basement' } };
+  const docs = [{ id: 'water-heater', name: 'Water heater', to: 'house' }, { id: 'old-furnace', name: 'Old furnace', to: 'heat-pump' },
+    { id: 'attic', name: 'Attic fan', to: '' }, { id: 'shed', name: 'Shed', to: 5 }];
+  const r = mergeImport(docs, id => here[id] || null, () => false);
+  assert.ok(r.puts.every(d => !('to' in d)), 'a page went in sending its sticker elsewhere: ' + JSON.stringify(r.puts));
+  assert.deepEqual(r.puts.map(d => d.id), ['attic', 'shed']);
+  assert.deepEqual(r.res, { added: 2, filled: 0, kept: 0, gone: 0,
+    skipped: ['"water-heater" (a sticker sent to another page, not a page)', '"old-furnace" (a sticker sent to another page, not a page)'] });
+  // a saved copy: a page deleted here isn't offered back as a sticker sent elsewhere
+  const copy = mergeImport([{ id: 'attic', name: 'Attic fan', to: 'house' }], () => null, id => id === 'attic', { back: true });
+  assert.deepEqual([copy.back, copy.puts, copy.res.skipped], [[], [], ['"attic" (a sticker sent to another page, not a page)']]);
+});
