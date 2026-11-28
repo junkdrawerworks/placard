@@ -539,7 +539,7 @@ export async function doneChecks({ browser, base, assert }) {
 
 // The whole manual on paper, from the Edit screen: a cover with the welcome, the 911 line, who to call, Good to know, the
 // front door's code and the day it was printed; the emergency pages in full; then every page by group, each group on a
-// new sheet and an emergency page there pointing to the front. Every page has its QR code. On Letter it fits the page,
+// new sheet and an emergency page there pointing to the front (a group of only emergency pages has no sheet). Every page has its QR code. On Letter it fits the page,
 // prints nothing else, and prints in the light palette with its step numbers in rings.
 export async function manualChecks({ browser, base, assert }) {
   const { ctx, L, errors, page } = await phone(browser, base);
@@ -564,9 +564,8 @@ export async function manualChecks({ browser, base, assert }) {
     assert.deepEqual(groups, [
       ['In an emergency', ['Main water shutoff (3 steps, water-shutoff)', 'Main electrical panel (2 steps, panel-main)', 'Smoke and CO alarms (2 steps, smoke-co)']],
       ['Water', ['Main water shutoff: with the emergency pages at the front.', 'Water heater (2 steps, water-heater)']],
-      ['Power', ['Main electrical panel: with the emergency pages at the front.']],
-      ['Heating and cooling', ['Air handler, upstairs (0 steps, air-handler-up)']],
-      ['Safety', ['Smoke and CO alarms: with the emergency pages at the front.']]]);
+      ['Heating and cooling', ['Air handler, upstairs (0 steps, air-handler-up)']]],
+      'a group with only emergency pages (Power, Safety) got a sheet of its own pointing to the front');
     // a page as a tenant reads it: no blank details; its own number, its job, its photo
     const wh = page.locator('.pm-page').filter({ has: page.locator('h3', { hasText: /^Water heater$/ }) });
     assert.deepEqual(await wh.locator('dt').allTextContents(), ['Make', 'Model', 'Installed', 'Breakers'], 'a blank detail on paper');
@@ -582,7 +581,7 @@ export async function manualChecks({ browser, base, assert }) {
     await page.emulateMedia({ media: 'print', colorScheme: 'dark' });
     const paper = await page.evaluate(() => ({ breaks: [...document.querySelectorAll('.manual > section')].map(s => getComputedStyle(s).breakBefore),
       ring: (s => [s.backgroundColor, s.color, s.borderTopStyle])(getComputedStyle(document.querySelector('.manual ol.steps li'), '::before')) }));
-    assert.deepEqual(paper, { breaks: ['auto', 'page', 'page', 'page', 'page', 'page'], ring: ['rgba(0, 0, 0, 0)', 'rgb(0, 0, 0)', 'solid'] });
+    assert.deepEqual(paper, { breaks: ['auto', 'page', 'page', 'page'], ring: ['rgba(0, 0, 0, 0)', 'rgb(0, 0, 0)', 'solid'] });
     await page.emulateMedia({ media: null, colorScheme: null });
     // a tenant gets the front page there, not the paper manual
     const tenant = await phone(browser, base);

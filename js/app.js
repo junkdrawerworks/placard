@@ -787,7 +787,8 @@ function renderManual() {
     urgent.length ? h('section', { class: 'pm-group' }, h('h2', {}, 'In an emergency'), urgent.map(paperPage)) : null,
     KINDS.map(([k, label]) => {
       const in_ = list.filter(s => group(s) === k);
-      return in_.length ? h('section', { class: 'pm-group' }, h('h2', {}, label),
+      // a group whose pages are all emergency pages is already at the front: no sheet of its own just to say so
+      return in_.some(s => !s.emergency) ? h('section', { class: 'pm-group' }, h('h2', {}, label),
         in_.map(s => s.emergency ? h('p', { class: 'pm-see' }, `${s.name}: with the emergency pages at the front.`) : paperPage(s))) : null;
     }))];
 }
