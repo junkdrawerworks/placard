@@ -655,6 +655,7 @@ function renderOwner() {
       h('button', { type: 'button', class: 'btn', disabled: !!wait, onclick: fresh(editHouse) }, 'House and contact'),
       h('button', { type: 'button', class: 'btn ghost', disabled: !!wait, onclick: fresh(addFromStarter) }, 'Add a system'),
       h('a', { class: 'btn ghost', href: '#/print' }, 'QR stickers'),
+      h('a', { class: 'btn ghost', href: '#/manual' }, 'Print the manual'),
       h('a', { class: 'btn ghost', href: '#/reports' }, `Reports${reports.length ? ' (' + reports.length + ')' : ''}`),
       h('button', { type: 'button', class: 'btn ghost', disabled: !!wait, onclick: importFacts }, 'Import')),
     wait ? h('p', { class: 'empty' }, wait) : null,
@@ -730,6 +731,59 @@ function firstSteps(s) {
     who.phone ? h('p', { class: 'qr-call' }, `Call ${who.name ? who.name + ', ' : ''}${who.phone}`) : null);
 }
 
+// The whole manual on paper, for a drawer or the lease packet: it works in a power cut with a flat phone, and for a
+// manager who keeps paper. The cover has the welcome, the 911 line, who to call (every number written out), Good to know,
+// the front door's code and the day it was printed; then the emergency pages in full, then every page by group (an
+// emergency page there points to the front), a new sheet for each group. Each page has its small QR code, so the paper
+// leads back to the live page. It waits for the QR library, as the QR sheet does.
+const qrBox = (id, size) => h('div', { class: 'qr', 'data-url': tagUrl('h', id), html: qrSvg(tagUrl('h', id), { size }) });
+const paperPerson = c => h('p', { class: 'pm-person' }, h('b', {}, c.name || 'Who to call'), c.phone ? ` ${c.phone}` : '', c.email ? ` · ${c.email}` : '', c.note ? h('span', {}, c.note) : null);
+function renderManual() {
+  const hs = house(), list = systems(), urgent = list.filter(s => s.emergency), c = hs.contact || {};
+  const top = h('div', { class: 'no-print' }, h('p', { class: 'crumb' }, h('a', { href: '#/owner' }, '‹ Edit')), h('h2', {}, 'Print the manual'),
+    h('p', { class: 'muted' }, 'The whole manual on paper, for a drawer or the lease packet: the emergency pages first, then every page by group, each with its QR code. Print on plain paper.'),
+    window.qrcode ? h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn', onclick: () => print() }, 'Print')) : null);
+  if (!window.qrcode) {
+    if (!qrAsked) { qrAsked = true; loadQr().then(render, () => { qrFailed = true; render(); }); }
+    return [top, h('p', { class: 'empty', role: 'status' }, qrFailed ? 'The QR codes didn\'t load. Reload the page to try again.' : 'Making the QR codes…')];
+  }
+  return [top, h('article', { class: 'manual' },
+    h('section', { class: 'pm-cover' },
+      h('p', { class: 'tape-cap' }, 'House manual'), h('h2', { class: 'pm-title' }, hs.title || 'House manual'),
+      hs.intro ? h('p', { class: 'lead' }, hs.intro) : null,
+      h('p', { class: 'pm-fire' }, FIRE),
+      reachable(c) || numbers().length ? h('section', { class: 'pm-call' }, h('h3', {}, 'Who to call'), reachable(c) ? paperPerson(c) : null, numbers().map(paperPerson)) : null,
+      hs.notes ? h('section', {}, h('h3', {}, 'Good to know'), lines(hs.notes).map(l => h('p', {}, l))) : null,
+      h('div', { class: 'pm-live' }, qrBox('house', 96), h('p', {}, 'Tap the sticker inside the front door, or scan this, for the live manual.')),
+      h('p', { class: 'pm-printed' }, `Printed ${dayText(today())}. The live manual may be newer.`)),
+    urgent.length ? h('section', { class: 'pm-group' }, h('h2', {}, 'In an emergency'), urgent.map(paperPage)) : null,
+    KINDS.map(([k, label]) => {
+      const in_ = list.filter(s => group(s) === k);
+      return in_.length ? h('section', { class: 'pm-group' }, h('h2', {}, label),
+        in_.map(s => s.emergency ? h('p', { class: 'pm-see' }, `${s.name}: with the emergency pages at the front.`) : paperPage(s))) : null;
+    }))];
+}
+// One page as a tenant reads it (no blank details), with its links written out for paper and, at its foot, the number
+// its card shows ("Call the number below" holds on paper too).
+function paperPage(s) {
+  const steps = lines(s.steps), facts = s.facts.filter(([, v]) => v.trim()), n = photoName(s.photo), c = house().contact || {};
+  const who = numberOf(s) || (c.phone ? c : null);
+  const img = n ? h('img', { class: 'pm-photo', src: 'photos/' + n, alt: `${s.name}${s.where ? ': ' + s.where : ''}` }) : null;
+  img?.addEventListener('error', () => img.remove());
+  return h('section', { class: 'pm-page' },
+    h('div', { class: 'pm-head' }, h('div', {}, h('h3', {}, s.name), s.where ? h('p', { class: 'where' }, h('b', {}, 'Where: '), s.where) : null), qrBox(s.id, 72)),
+    lifeSafety(s) ? h('p', { class: 'pm-fire' }, FIRE) : null,
+    img,
+    s.summary ? h('p', {}, s.summary) : null,
+    s.warn ? h('p', { class: 'pm-warn' }, s.warn) : null,
+    steps.length ? h('ol', { class: 'steps' }, steps.map(l => h('li', {}, l))) : null,
+    facts.length ? h('dl', { class: 'facts' }, facts.map(([k, v]) => !k ? h('dd', { class: 'whole' }, v) : [h('dt', {}, k), h('dd', {}, v)])) : null,
+    lines(s.care).map(l => h('p', {}, l)),
+    doneText(s) ? h('p', { class: 'done' }, doneText(s)) : null,
+    s.manual ? h('p', { class: 'pm-link' }, 'The manual: ', s.manual) : null,
+    who?.phone ? h('p', { class: 'pm-person' }, h('b', {}, 'Who to call: '), `${who.name ? who.name + ', ' : ''}${who.phone}`) : null);
+}
+
 // One card for the same words from the same page on one day (groupReports): sent again, or kept by the ledger as a
 // repeat, it says how many times and when, and one Mark handled does them all. A phone number left in a report gets
 // Call and Text, an email address Email, each with the person's name when the card holds more than one person's.
@@ -802,6 +856,7 @@ function render() {
   else if (!owner() && !site.length && siteError === 'noload') body = [h('div', { class: 'notice warn' }, h('p', {}, h('b', {}, 'The house manual didn\'t load. '), 'Try again in a minute, or call the number you were given.'), tryAgain())];
   else if (r.view === 'owner' && owner()) body = renderOwner();
   else if (r.view === 'print' && owner()) body = renderPrint();
+  else if (r.view === 'manual' && owner()) body = renderManual();
   else if (r.view === 'reports' && owner()) body = renderReports();
   else if (r.view === 'item' && FRONT.has(r.id)) body = renderHome();
   // a deleted page's sticker sent to another page: that page, at its own address

@@ -503,6 +503,63 @@ export async function doneChecks({ browser, base, assert }) {
   } finally { await ctx.close(); }
 }
 
+// The whole manual on paper, from the Edit screen: a cover with the welcome, the 911 line, who to call, Good to know, the
+// front door's code and the day it was printed; the emergency pages in full; then every page by group, each group on a
+// new sheet and an emergency page there pointing to the front. Every page has its QR code. On Letter it fits the page,
+// prints nothing else, and prints in the light palette with its step numbers in rings.
+export async function manualChecks({ browser, base, assert }) {
+  const { ctx, L, errors, page } = await phone(browser, base);
+  await ctx.addInitScript(u => localStorage.setItem('placard.ledger', JSON.stringify({ url: u, key: 'k'.repeat(40) })), LEDGER);
+  L.site = L.site.map(d => d.id === 'house' ? { ...d, numbers: [{ id: 'septic', name: 'Hudson Septic', phone: '845-555-0170', note: 'The septic alarm sounds.' }] }
+    : d.id === 'water-heater' ? { ...d, call: 'septic', facts: [...d.facts, ['Anode', '']] } : d);
+  try {
+    await page.goto(base + '#/owner');
+    await page.waitForSelector('.list .row');
+    assert.equal(await page.locator('a', { hasText: 'Print the manual' }).getAttribute('href'), '#/manual');
+    await page.click('text=Print the manual');
+    await page.waitForSelector('.manual .pm-page .qr svg');
+    const today = await page.evaluate(() => { const d = new Date(), M = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']; return `${M[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`; });
+    const cover = await page.locator('.pm-cover').evaluate(c => ({ title: c.querySelector('.pm-title').textContent, fire: c.querySelector('.pm-fire').textContent,
+      call: [...c.querySelectorAll('.pm-person')].map(p => p.textContent), qr: c.querySelector('.qr').dataset.url, printed: c.querySelector('.pm-printed').textContent,
+      notes: [...c.querySelectorAll('section')].find(x => x.querySelector('h3')?.textContent === 'Good to know')?.querySelector('p')?.textContent }));
+    assert.deepEqual(cover, { title: 'House manual', fire: 'Fire, smoke or a CO alarm: get everyone out, then call 911.',
+      call: ['Riverbend Property Care 555-0142 · help@example.com' + 'Call any time for a leak, no heat or no power. Text for anything else.', 'Hudson Septic 845-555-0170The septic alarm sounds.'],
+      qr: 'https://tag.junkdrawer.works/h/house', printed: `Printed ${today}. The live manual may be newer.`, notes: 'Trash goes out Monday night; recycling every other Thursday.' });
+    const groups = await page.locator('.pm-group').evaluateAll(gs => gs.map(g => [g.querySelector('h2').textContent,
+      [...g.querySelectorAll(':scope > .pm-page, :scope > .pm-see')].map(p => p.classList.contains('pm-see') ? p.textContent : `${p.querySelector('h3').textContent} (${p.querySelectorAll('ol.steps li').length} steps, ${p.querySelector('.qr').dataset.url.split('/').pop()})`)]));
+    assert.deepEqual(groups, [
+      ['In an emergency', ['Main water shutoff (3 steps, water-shutoff)', 'Main electrical panel (2 steps, panel-main)', 'Smoke and CO alarms (2 steps, smoke-co)']],
+      ['Water', ['Main water shutoff: with the emergency pages at the front.', 'Water heater (2 steps, water-heater)']],
+      ['Power', ['Main electrical panel: with the emergency pages at the front.']],
+      ['Heating and cooling', ['Air handler, upstairs (0 steps, air-handler-up)']],
+      ['Safety', ['Smoke and CO alarms: with the emergency pages at the front.']]]);
+    // a page as a tenant reads it: no blank details; its own number, its job, its photo
+    const wh = page.locator('.pm-page').filter({ has: page.locator('h3', { hasText: /^Water heater$/ }) });
+    assert.deepEqual(await wh.locator('dt').allTextContents(), ['Make', 'Model', 'Installed', 'Breakers'], 'a blank detail on paper');
+    assert.equal(await wh.locator('.pm-person').textContent(), 'Who to call: Hudson Septic, 845-555-0170');
+    assert.deepEqual(await page.locator('.pm-group').first().locator('.pm-person').allTextContents(), Array(3).fill('Who to call: Riverbend Property Care, 555-0142'),
+      'an emergency page on paper without the number its steps say to call');
+    assert.equal(await page.locator('.pm-page', { hasText: 'Air handler, upstairs' }).locator('.done').textContent(), 'Last filter change: Aug 2, 2026. Every 3 months.');
+    assert.equal(await page.locator('.pm-group').first().locator('.pm-page').first().locator('img.pm-photo').getAttribute('src'), 'photos/sample-shutoff.jpg');
+    assert.equal(await page.locator('.pm-group').first().locator('.pm-page', { hasText: 'Smoke and CO alarms' }).locator('.pm-fire').count(), 1, 'the alarm page has no 911 line');
+    assert.equal(await page.locator('.manual .qr svg').count(), 1 + 3 + 2, 'a page without its QR code');
+    // on paper: a new sheet for each group, nothing but the manual, the light palette, step numbers in rings
+    await printChecks(page, assert, '.manual');
+    await page.emulateMedia({ media: 'print', colorScheme: 'dark' });
+    const paper = await page.evaluate(() => ({ breaks: [...document.querySelectorAll('.manual > section')].map(s => getComputedStyle(s).breakBefore),
+      ring: (s => [s.backgroundColor, s.color, s.borderTopStyle])(getComputedStyle(document.querySelector('.manual ol.steps li'), '::before')) }));
+    assert.deepEqual(paper, { breaks: ['auto', 'page', 'page', 'page', 'page', 'page'], ring: ['rgba(0, 0, 0, 0)', 'rgb(0, 0, 0)', 'solid'] });
+    await page.emulateMedia({ media: null, colorScheme: null });
+    // a tenant gets the front page there, not the paper manual
+    const tenant = await phone(browser, base);
+    await tenant.page.goto(base + '#/manual');
+    await tenant.page.waitForSelector('.urgent-tile');
+    assert.equal(await tenant.page.locator('.manual').count(), 0);
+    await tenant.ctx.close();
+    assert.deepEqual(errors, []);
+  } finally { await ctx.close(); }
+}
+
 export async function retryChecks({ browser, base, assert }) {
   const { ctx, L, errors, page } = await phone(browser, base);
   // no signal as the phone sees it: navigator.onLine is false while the cookie offline=1 is set
@@ -1255,6 +1312,7 @@ export async function appChecks({ page, ctx, base, assert, problems }) {
   await fireChecks({ browser: ctx.browser(), base, assert });
   await photoChecks({ browser: ctx.browser(), base, assert });
   await doneChecks({ browser: ctx.browser(), base, assert });
+  await manualChecks({ browser: ctx.browser(), base, assert });
   await numbersChecks({ browser: ctx.browser(), base, assert });
   await ownerChecks({ browser: ctx.browser(), base, assert });
   await forwardChecks({ browser: ctx.browser(), base, assert });
