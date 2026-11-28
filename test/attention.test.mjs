@@ -32,3 +32,32 @@ test('several jobs due: the longest overdue first, on the owner\'s list; the fro
   assert.deepEqual(look(reader({ site }), nov), [{ text: 'Rental: Crawl space due; Water heater - flush due', href: '#/owner' }]);
   assert.deepEqual(look(reader({}), nov), []);
 });
+
+test('Find anything: every page in the manual\'s order, by name and where it is', async () => {
+  const { things } = await import('../js/attention.js');
+  const { found } = await import('../js/kit/find.js');
+  const all = things(reader(data));
+  assert.deepEqual(all.map(t => t.href), ['#water-shutoff', '#water-heater', '#panel-main', '#air-handler-up', '#smoke-co']);
+  assert.deepEqual(all[1], { name: 'Water heater', where: 'Basement, beside the furnace room door.', href: '#water-heater', texts: ['Water heater', 'Basement, beside the furnace room door.'] });
+  const hits = q => all.filter(t => found(q, ...t.texts)).map(t => t.href);
+  assert.deepEqual(hits('basement'), ['#water-shutoff', '#water-heater', '#smoke-co']);
+  assert.deepEqual(hits('attic'), ['#air-handler-up']);
+  const site = [{ id: 'house', title: 'Sample house' }, { id: 'crawl-space', kind: 'other' }, { id: 'old', to: 'crawl-space' }];
+  assert.deepEqual(things(reader({ site })), [{ name: 'Crawl space', where: 'Everything else', href: '#crawl-space', texts: ['Crawl space', undefined] }],
+    'a page with no name or place goes by its id and its group; the front page and a sent-on sticker aren\'t pages');
+});
+
+test('Check a tag: a page\'s sticker names the page; the front page\'s the manual; a sent-on sticker the page it lands on', async () => {
+  const { tags } = await import('../js/attention.js');
+  const t = tags(reader(data));
+  assert.deepEqual(t['water-heater'], { name: 'Water heater', where: 'Basement, beside the furnace room door.' });
+  assert.deepEqual(t.house, { name: 'House manual', where: 'Front page' });
+  assert.deepEqual(t.home, t.house);
+  const site = [{ id: 'furnace', name: 'Furnace', where: 'Basement' }, { id: 'old-furnace', to: 'furnace' }, { id: 'older', to: 'old-furnace' },
+    { id: 'loop-a', to: 'loop-b' }, { id: 'loop-b', to: 'loop-a' }, { id: 'nowhere', to: 'gone' }];
+  const s = tags(reader({ site }));
+  assert.deepEqual([s['old-furnace'], s.older], [s.furnace, s.furnace]);
+  assert.deepEqual([s['loop-a'], s.nowhere, s.gone], [undefined, undefined, undefined]);
+  assert.deepEqual(s.house, { name: 'House manual', where: 'Front page' });
+  assert.deepEqual(tags(reader({})), {}, 'no manual yet: no sticker is set up');
+});
