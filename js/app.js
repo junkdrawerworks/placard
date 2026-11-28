@@ -309,12 +309,15 @@ function report(s) {
 }
 
 // ---------------------------------------------------------------- owner
+// The name of the page another Placard sticker opens, for the sticker panel's lines ("This sticker opens Water heater,
+// not Furnace"); another app's sticker the panel names itself.
+const stickerName = t => t.letter !== 'h' ? null : FRONT.has(t.id) ? 'the front page' : sys(t.id)?.name || null;
 function ownerTools(s) {
   return h('section', { class: 'owner card' },
     h('h2', {}, 'Owner'),
     h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn', onclick: () => editSystem(s) }, 'Edit this page')),
     // A new sticker written for a locked page (a replacement or a spare) is written, not locked, until it's locked too.
-    nfcPanel(tagUrl('h', s.id), { lock: true, label: 'Write sticker', sample: !!ledger.demo, tagged: s.tagged, locked: s.locked,
+    nfcPanel(tagUrl('h', s.id), { lock: true, label: 'Write sticker', sample: !!ledger.demo, tagged: s.tagged, locked: s.locked, name: s.name, nameOf: stickerName,
       onWritten: () => save({ ...(sys(s.id) || s), tagged: today(), locked: null }), onLocked: () => save({ ...(sys(s.id) || s), locked: today() }) }));
 }
 
@@ -499,7 +502,7 @@ function frontTag() {
   return h('section', { class: 'owner card front-tag' },
     h('h2', {}, 'Front-door sticker'),
     h('p', { class: 'muted' }, 'Opens the whole manual. Put it inside the front door; its QR card is the first on the sheet.'),
-    nfcPanel(tagUrl('h', 'house'), { lock: true, label: 'Write sticker', sample: !!ledger.demo, tagged: hs.tagged, locked: hs.locked,
+    nfcPanel(tagUrl('h', 'house'), { lock: true, label: 'Write sticker', sample: !!ledger.demo, tagged: hs.tagged, locked: hs.locked, name: 'the front page', nameOf: stickerName,
       onWritten: () => mark({ tagged: today(), locked: null }), onLocked: () => mark({ locked: today() }) }));
 }
 

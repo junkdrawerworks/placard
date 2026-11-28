@@ -6,12 +6,25 @@ import { SAMPLE, STARTER } from '../js/starter.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const LEDGER = 'https://script.google.com/macros/s/AKfyTEST/exec';
+// A pretend Chrome NFC reader with one sticker held against the phone (__nfc.sticker: a blank one to start with). A scan
+// reads it at once; a write that mustn't write over anything is turned down by a sticker holding a link, and every
+// write by a locked one, as Chrome does; a lock locks it. __nfc.hold(url, locked) puts another sticker there.
 const fakeNfc = () => {
-  window.__nfc = { writes: [], locks: 0 };
+  window.__nfc = { writes: [], locks: 0, sticker: { url: '', locked: false } };
+  window.__nfc.hold = (url = '', locked = false) => { window.__nfc.sticker = { url, locked }; };
   window.NDEFReader = class {
-    async write(msg) { window.__nfc.writes.push(msg.records[0].data); }
-    async makeReadOnly() { window.__nfc.locks++; }
-    async scan() {}
+    async write(msg, { overwrite = true } = {}) {
+      const s = window.__nfc.sticker;
+      if (s.locked) throw new DOMException('', 'NotAllowedError');
+      if (!overwrite && s.url) throw new DOMException('NDEFWriteOptions#overwrite does not allow overwrite.', 'NotAllowedError');
+      window.__nfc.writes.push(msg.records[0].data);
+      s.url = msg.records[0].data;
+    }
+    async makeReadOnly() { window.__nfc.locks++; window.__nfc.sticker.locked = true; }
+    async scan({ signal } = {}) {
+      const { url } = window.__nfc.sticker;
+      setTimeout(() => { if (!signal?.aborted) this.onreading?.({ serialNumber: '04:5e', message: { records: url ? [{ recordType: 'url', data: new TextEncoder().encode(url) }] : [] } }); }, 20);
+    }
   };
 };
 // A phone on a published manual: js/config.js as served carries a ledger address (published: true), and a pretend
@@ -377,6 +390,21 @@ export async function ownerChecks({ browser, base, assert }) {
     await page.waitForFunction(() => /not locked yet\.$/.test(document.querySelector('.nfc .state')?.textContent));
     assert.equal(await said(), 'Written. Tap it with the phone to check, then lock it.');
     assert.equal(await page.locator('.nfc .msg.sample').count(), 0, 'the sample\'s lines on the owner\'s own manual');
+    // Lock reads the sticker first: another page's sticker, or a blank one, isn't locked, and the panel says why
+    for (const [held, line] of [['https://tag.junkdrawer.works/h/smoke-co', 'This sticker opens Smoke and CO alarms, not Water heater. Nothing was locked.'],
+      ['https://tag.junkdrawer.works/h/house', 'This sticker opens the front page, not Water heater. Nothing was locked.'],
+      ['https://tag.junkdrawer.works/t/02', 'This sticker opens Mothball tote 02, not Water heater. Nothing was locked.'],
+      ['', 'This sticker is blank. Write it first, then lock it.']]) {
+      await page.evaluate(u => window.__nfc.hold(u), held);
+      await page.click('text=Lock sticker');
+      await page.click('dialog >> text=Lock it');
+      await page.waitForFunction(l => document.querySelector('.nfc > .msg:last-child')?.textContent === l, line);
+      assert.equal(await page.locator('.nfc > .msg:last-child').getAttribute('class'), 'msg bad');
+      assert.equal(await page.evaluate(() => window.__nfc.locks), 0, 'locked a sticker that isn\'t this page\'s: ' + held);
+      assert.match(await state(), /not locked yet\.$/);
+    }
+    // its own sticker: locked
+    await page.evaluate(() => window.__nfc.hold('https://tag.junkdrawer.works/h/water-heater'));
     await page.click('text=Lock sticker');
     await page.click('dialog >> text=Lock it');
     await page.waitForFunction(() => window.__nfc.locks === 1);
@@ -390,6 +418,7 @@ export async function ownerChecks({ browser, base, assert }) {
     // a replacement (or a spare) for a locked sticker: a new one for the same page, written and not locked until it is
     await page.click('.nfc >> text=Replace or make a spare');
     await page.waitForSelector('.nfc >> text=Use a new blank sticker. The old one, wherever it is, keeps opening this page.');
+    await page.evaluate(() => window.__nfc.hold());
     await page.click('.nfc >> text=Write sticker');
     await page.waitForFunction(() => window.__nfc.writes.length === 2);
     await page.waitForFunction(() => /not locked yet\.$/.test(document.querySelector('.nfc .state')?.textContent));
@@ -404,6 +433,7 @@ export async function ownerChecks({ browser, base, assert }) {
     await page.goto(base + '#/owner');
     const front = page.locator('.front-tag');
     assert.equal(await front.locator('.url').textContent(), 'https://tag.junkdrawer.works/h/house');
+    await page.evaluate(() => window.__nfc.hold());
     await front.locator('text=Write sticker').click();
     await page.waitForFunction(() => window.__nfc.writes.length === 3);
     await page.waitForFunction(() => /not locked yet\.$/.test(document.querySelector('.front-tag .state')?.textContent));
