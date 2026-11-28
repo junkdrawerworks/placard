@@ -25,9 +25,24 @@ const jset = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } cat
 // The front page is the house doc. Its own sticker, tag.junkdrawer.works/h/house (or h/home), opens it, so those two
 // ids are never a system's page.
 const FRONT = new Set(['house', 'home']);
+// A page deleted while its sticker was written or locked can leave a small record in its place, { id, to, name,
+// tagged, locked }, that sends its sticker to another page (to: a page's id, or house for the front page). It's in the
+// manual like any page, so a tenant's phone has it offline, and no script changes; it's never listed as a page.
+const sendsOn = d => typeof d?.to === 'string' && !!d.to;
 const house = () => site.find(d => d.id === 'house') || { title: 'House manual' };
-const systems = () => site.filter(d => !FRONT.has(d.id)).sort((a, b) => a.order - b.order || String(a.name).localeCompare(String(b.name)));
-const sys = id => FRONT.has(id) ? null : site.find(d => d.id === id);
+const systems = () => site.filter(d => !FRONT.has(d.id) && !sendsOn(d)).sort((a, b) => a.order - b.order || String(a.name).localeCompare(String(b.name)));
+const sys = id => FRONT.has(id) ? null : site.find(d => d.id === id && !sendsOn(d));
+const sentOn = () => site.filter(sendsOn).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+const sentFrom = id => site.find(d => d.id === id && sendsOn(d));
+// Where a sticker sent elsewhere lands: its record's page, or where that one's sticker was sent in turn (a few steps at
+// most, so two records sending to each other can't go round for ever). A page, the front page, or a page gone.
+function landing(id) {
+  let at = id;
+  for (let i = 0; i < 5 && sentFrom(at); i++) at = sentFrom(at).to;
+  return sentFrom(at) ? id : at;
+}
+// "Main water shutoff", "the front page", or the id of a page no longer in the manual
+const pageName = id => FRONT.has(id) ? 'the front page' : sys(id)?.name || `${id} (not in the manual)`;
 // The pages as the screens use them. A record typed into the sheet by hand, or from an old import, can lack a name or an
 // order, have details typed as text instead of a list, or a group that isn't one of the six: each page still draws
 // and is listed (a page without a name goes by its id, 'crawl-space' as 'Crawl space'; details typed as text read as
@@ -36,6 +51,7 @@ const sys = id => FRONT.has(id) ? null : site.find(d => d.id === id);
 const str = v => (v == null ? '' : typeof v === 'string' ? v : String(v));
 const group = s => (KINDS.some(([k]) => k === s.kind) ? s.kind : 'other');
 function normal(d) {
+  if (sendsOn(d)) return { ...d, to: d.to.toLowerCase(), name: typeof d.name === 'string' && d.name.trim() ? d.name : d.id };
   if (d.id === 'house') {
     const c = d.contact && typeof d.contact === 'object' && !Array.isArray(d.contact) ? d.contact : null;
     return c ? { ...d, contact: { name: str(c.name), phone: str(c.phone), email: str(c.email), note: str(c.note) } } : d;
@@ -311,14 +327,16 @@ function report(s) {
 // ---------------------------------------------------------------- owner
 // The name of the page another Placard sticker opens, for the sticker panel's lines ("This sticker opens Water heater,
 // not Furnace"); another app's sticker the panel names itself.
-const stickerName = t => t.letter !== 'h' ? null : FRONT.has(t.id) ? 'the front page' : sys(t.id)?.name || null;
+const stickerName = t => t.letter !== 'h' ? null : FRONT.has(t.id) ? 'the front page' : sys(t.id)?.name || sentFrom(t.id)?.name || null;
+// A locked page's sticker can't be rewritten, but deleting the page can send it to another one (deletePage).
+const MOVE_PAGE = 'To send it to another page, delete this one (Edit this page, then Delete) and pick where its sticker goes.';
 function ownerTools(s) {
   return h('section', { class: 'owner card' },
     h('h2', {}, 'Owner'),
     h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn', onclick: () => editSystem(s) }, 'Edit this page')),
     // A new sticker written for a locked page is a replacement (the page is then written, not locked, until it's locked
     // too) or a spare to keep (the page stays locked; spare and spareLocked say when one was last written and locked).
-    nfcPanel(tagUrl('h', s.id), { lock: true, label: 'Write sticker', sample: !!ledger.demo, tagged: s.tagged, locked: s.locked, name: s.name, nameOf: stickerName,
+    nfcPanel(tagUrl('h', s.id), { lock: true, label: 'Write sticker', sample: !!ledger.demo, tagged: s.tagged, locked: s.locked, name: s.name, nameOf: stickerName, move: MOVE_PAGE,
       spare: s.spare, spareLocked: s.spareLocked,
       onWritten: () => save({ ...(sys(s.id) || s), tagged: today(), locked: null }), onLocked: () => save({ ...(sys(s.id) || s), locked: today() }),
       onSpare: () => save({ ...(sys(s.id) || s), spare: today(), spareLocked: null }), onSpareLocked: () => save({ ...(sys(s.id) || s), spareLocked: today() }) }));
@@ -401,12 +419,7 @@ async function editSystem(s) {
     { name: 'order', label: 'Order on the page', type: 'number', value: s?.order ?? systems().length + 1, inputmode: 'numeric' },
   ] });
   if (!v) return;
-  if (v.__danger) {
-    if (await confirmSheet('Delete ' + s.name + '?', 'Its page goes. A sticker written for it will open a page saying it isn\'t in the manual yet, with Who to call and the whole manual.', 'Delete', { danger: true })) {
-      ledger.del('site', s.id); fromLedger(); go('#/owner');
-    }
-    return;
-  }
+  if (v.__danger) { await deletePage(s); return; }
   const doc = made(v), id = doc.id;
   // the page came in from the ledger while the sheet was open (made on another device): it isn't saved over
   if (!exists && sys(id)) { toast('That page is in the manual now. Open it to edit it.', 'bad'); fromLedger(); go('#' + id); render(); return; }
@@ -414,6 +427,52 @@ async function editSystem(s) {
   saidSaved(id);
   if (!exists) go('#' + id);
 }
+// Delete a page. One whose sticker is written or locked, or that stickers of pages deleted before were sent to, asks
+// where they should go instead (the front page unless picked): its own record is left in its place to send its sticker
+// there, and those sent here go there too. Nowhere: as a page with no sticker, its address says it isn't in the manual.
+async function deletePage(s) {
+  const own = !!(s.tagged || s.locked), here = sentOn().filter(f => f.to === s.id);
+  if (!own && !here.length) {
+    if (await confirmSheet('Delete ' + s.name + '?', 'Its page goes. A sticker written for it will open a page saying it isn\'t in the manual yet, with Who to call and the whole manual.', 'Delete', { danger: true })) {
+      ledger.del('site', s.id); fromLedger(); go('#/owner');
+    }
+    return;
+  }
+  const from = andList(here.map(f => f.name)), many = (own ? 1 : 0) + here.length > 1;
+  const whose = own && here.length ? `Its sticker (${s.locked ? 'locked' : 'written'}), and the one${here.length > 1 ? 's' : ''} sent here from ${from}, will`
+    : own ? `Its sticker (${s.locked ? 'locked' : 'written'}) will` : `The sticker${here.length > 1 ? 's' : ''} sent here from ${from} will`;
+  const pick = h('select', { id: 'f-to', name: 'to' },
+    [['house', 'The front page'], ...systems().filter(x => x.id !== s.id).map(x => [x.id, x.name]), ['', 'Nowhere: a page saying it isn\'t in the manual']]
+      .map(([v, l]) => h('option', { value: v, selected: v === 'house' }, l)));
+  const v = await sheet({ title: 'Delete ' + s.name + '?', ok: 'Delete', okDanger: true, body: h('div', {},
+    h('p', {}, `Its page goes. ${whose} keep opening this page's address. Send ${many ? 'them' : 'it'} to another page instead?`),
+    h('label', { class: 'field', for: 'f-to' }, h('span', {}, many ? 'Send them to' : 'Send it to'), pick)) });
+  if (!v) return;
+  const to = pick.value;
+  if (to && own) ledger.put('site', { id: s.id, to, name: s.name, tagged: s.tagged || null, locked: s.locked || null });
+  else ledger.del('site', s.id);
+  if (to) for (const f of here) ledger.put('site', { ...(ledger.doc('site', f.id) || f), to });
+  fromLedger(); go('#/owner');
+  const opensNow = own && !here.length ? 'Its sticker opens' : !own && here.length === 1 ? `${here[0].name}'s sticker opens` : 'The stickers open';
+  toast(to ? `Deleted. ${opensNow} ${pageName(to)}.` : 'Deleted.');
+}
+// "Boiler", "Boiler and Old fridge", "Boiler, Well and Old fridge"
+const andList = names => names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+
+// A sticker sent elsewhere, from the Edit list: where it goes, changed, or not sent anywhere any more (its address then
+// says the page isn't in the manual, with Make this page for the owner).
+async function editSent(f) {
+  const v = await sheet({ title: `${f.name}'s sticker`, danger: 'Stop sending it', fields: [
+    { name: 'to', label: 'Opens', type: 'select', value: f.to, hint: 'Its page was deleted, so its sticker opens this page instead.',
+      options: [['house', 'The front page'], ...systems().map(x => [x.id, x.name]), ...(f.to === 'house' || sys(f.to) ? [] : [[f.to, pageName(f.to)]])] }] });
+  if (!v) return;
+  if (v.__danger) {
+    if (!await confirmSheet(`Stop sending ${f.name}'s sticker?`, 'It will open a page saying it isn\'t in the manual, with Who to call and the whole manual.', 'Stop sending it', { danger: true })) return;
+    ledger.del('site', f.id); fromLedger(); render(); return;
+  }
+  if (v.to && v.to !== f.to) { ledger.put('site', { ...(ledger.doc('site', f.id) || f), to: v.to }); fromLedger(); render(); }
+}
+
 function uniqueId(name) {
   const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || 'system';
   let id = base, n = 2;
@@ -467,7 +526,7 @@ function importFacts() {
       const data = JSON.parse(await input.files[0].text());
       const docs = Array.isArray(data) ? data : data?.docs;
       if (!Array.isArray(docs)) throw new Error('no pages');
-      merged = mergeImport(docs, id => ledger.doc('site', id), id => ledger.gone('site', id));
+      merged = mergeImport(docs, id => ledger.doc('site', id), id => ledger.gone('site', id) || sendsOn(ledger.doc('site', id)));
     } catch { toast('That file isn\'t a Placard import.', 'bad'); return; }
     for (const doc of merged.puts) ledger.put('site', doc);
     fromLedger(); render();
@@ -494,6 +553,10 @@ function renderOwner() {
       h('span', { class: 'main' }, h('span', { class: 't' }, s.name), h('span', { class: 's' }, s.where || 'No location yet')),
       h('span', { class: 'chips' }, s.facts.some(([, v]) => !v.trim()) ? h('span', { class: 'chip warn' }, 'blank details') : null,
         h('span', { class: 'chip ' + (s.locked ? 'ok' : s.tagged ? 'warn' : '') }, s.locked ? 'locked' : s.tagged ? 'written' : 'no tag')))))),
+    !wait && sentOn().length ? h('section', {}, h('h3', {}, 'Stickers sent to another page'),
+      h('ul', { class: 'list sent-on' }, sentOn().map(f => h('li', {}, h('button', { type: 'button', class: 'row', onclick: () => editSent(f) },
+        h('span', { class: 'main' }, h('span', { class: 't' }, f.name), h('span', { class: 's' }, `sticker → ${pageName(landing(f.id))}`)),
+        h('span', { class: 'chips' }, h('span', { class: 'chip ' + (f.locked ? 'ok' : 'warn') }, f.locked ? 'locked' : 'written'))))))) : null,
     wait ? null : frontTag(),
   ];
 }
@@ -592,6 +655,8 @@ function render() {
   else if (r.view === 'print' && owner()) body = renderPrint();
   else if (r.view === 'reports' && owner()) body = renderReports();
   else if (r.view === 'item' && FRONT.has(r.id)) body = renderHome();
+  // a deleted page's sticker sent to another page: that page, at its own address
+  else if (r.view === 'item' && sentFrom(r.id) && landing(r.id) !== r.id) { history.replaceState(null, '', '#' + landing(r.id)); render(); return; }
   else if (r.view === 'item') {
     const s = sys(r.id), wait = owner() ? ledger.notReady('site') : site.length ? '' : 'Loading…', badId = owner() && refusal({ id: r.id });
     body = s ? renderSystem(s) : wait ? [h('p', { class: 'crumb' }, h('a', { href: '#' }, '‹ House manual')), h('p', { class: 'empty' }, wait)] : renderNotFound(r.id, badId); }

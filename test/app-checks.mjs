@@ -410,7 +410,7 @@ export async function ownerChecks({ browser, base, assert }) {
     await page.waitForFunction(() => window.__nfc.locks === 1);
     // locked: no Write or Lock to press by mistake, and where a change of address is made instead
     await page.waitForFunction(() => /^Locked /.test(document.querySelector('.nfc .state')?.textContent));
-    assert.match(await state(), /^Locked [A-Z][a-z]{2} \d{1,2}, \d{4}\. To send it somewhere else, add it to OVERRIDES in Switchboard's 404\.html\.$/);
+    assert.match(await state(), /^Locked [A-Z][a-z]{2} \d{1,2}, \d{4}\. To send it to another page, delete this one \(Edit this page, then Delete\) and pick where its sticker goes\.$/);
     assert.equal(await page.locator('.nfc button', { hasText: /Write sticker|Lock sticker/ }).count(), 0, 'Write and Lock offered for a locked sticker');
     assert.equal(await said(), 'Locked. It will open this page for good.');
     await page.waitForFunction(() => /^(Saved|Up to date)$/.test(document.querySelector('.sync')?.textContent));
@@ -488,6 +488,123 @@ export async function ownerChecks({ browser, base, assert }) {
 
 // What the owner is told about what tenants get: js/config.js empty, an address that answers 404 (mistyped, or a
 // deployment since archived), and another deployment's address. "Tenants see it now" only when they do.
+// A page deleted while its sticker is locked: Delete asks where its sticker should go instead (the front page unless
+// picked), and a small record in the manual sends it there, for tenants too, offline included. The Edit list shows
+// "sticker → …", where it can be sent elsewhere or stopped. A page a sticker was sent to asks too, and passes it on.
+// A locked page's line says this is the way.
+export async function forwardChecks({ browser, base, assert }) {
+  const day = '2026-11-20', site = structuredClone(SAMPLE['placard.site']);
+  for (const d of site) if (d.id === 'water-heater' || d.id === 'smoke-co' || d.id === 'house') Object.assign(d, { tagged: day, locked: day });
+  const { ctx, L, errors, page } = await phone(browser, base);
+  L.site = site;
+  await ctx.addInitScript(u => localStorage.setItem('placard.ledger', JSON.stringify({ url: u, key: 'k'.repeat(40) })), LEDGER);
+  await ctx.addInitScript(fakeNfc);
+  const settled = () => page.waitForFunction(() => /^(Saved|Up to date)$/.test(document.querySelector('.sync')?.textContent));
+  const doc = id => page.evaluate(id => window.__placard.ledger.doc('site', id), id);
+  const del = async name => {
+    await page.click('text=Edit this page');
+    await page.click('dialog[open] button.danger');
+    const ask = page.getByRole('dialog', { name: `Delete ${name}?` });
+    await ask.waitFor();
+    return ask;
+  };
+  try {
+    await page.goto(base + '#water-heater');
+    await page.waitForSelector('.tape >> text=Water heater');
+    assert.equal(await page.locator('.nfc .state').textContent(), 'Locked Nov 20, 2026. To send it to another page, delete this one (Edit this page, then Delete) and pick where its sticker goes.');
+    // the front page can't be deleted: the front-door sticker's line still names OVERRIDES
+    await page.goto(base + '#/owner');
+    await page.waitForFunction(() => /^Locked/.test(document.querySelector('.front-tag .state')?.textContent));
+    assert.equal(await page.locator('.front-tag .state').textContent(), 'Locked Nov 20, 2026. To send it somewhere else, add it to OVERRIDES in Switchboard\'s 404.html.');
+    await page.goto(base + '#water-heater');
+    await page.waitForSelector('.tape >> text=Water heater');
+    let ask = await del('Water heater');
+    assert.equal(await ask.locator('form p').first().textContent(), 'Its page goes. Its sticker (locked) will keep opening this page\'s address. Send it to another page instead?');
+    assert.equal(await ask.locator('#f-to').inputValue(), 'house', 'the front page isn\'t picked to start with');
+    assert.deepEqual(await ask.locator('#f-to option').allTextContents(), ['The front page', 'Main water shutoff', 'Main electrical panel', 'Air handler, upstairs', 'Smoke and CO alarms',
+      'Nowhere: a page saying it isn\'t in the manual']);
+    assert.deepEqual(await ask.locator('button[type=submit]').evaluate(b => [b.textContent, b.className]), ['Delete', 'btn danger']);
+    await ask.locator('#f-to').selectOption('panel-main');
+    await ask.locator('button[type=submit]').click();
+    await page.waitForSelector('.toast.show >> text=Deleted. Its sticker opens Main electrical panel.');
+    await settled();
+    const { _updated, ...rec } = L.puts.at(-1);
+    assert.deepEqual(rec, { id: 'water-heater', to: 'panel-main', name: 'Water heater', tagged: day, locked: day }, 'the record that sends it didn\'t reach the sheet');
+    // not a page in the Edit list any more, nor on the QR sheet; a row says where its sticker goes
+    assert.equal(await page.locator('.list:not(.sent-on) .row', { hasText: 'Water heater' }).count(), 0);
+    const row = () => page.locator('.sent-on .row').evaluate(r => [r.querySelector('.t').textContent, r.querySelector('.s').textContent, r.querySelector('.chip').textContent]);
+    assert.deepEqual(await row(), ['Water heater', 'sticker → Main electrical panel', 'locked']);
+    // its sticker's address opens that page, at that page's own address
+    await page.goto(base + '#water-heater');
+    await page.waitForSelector('.tape >> text=Main electrical panel');
+    assert.equal(new URL(page.url()).hash, '#panel-main');
+    // that page deleted in turn (no sticker of its own): asked too, and the sticker sent there goes on with it
+    ask = await del('Main electrical panel');
+    assert.equal(await ask.locator('form p').first().textContent(), 'Its page goes. The sticker sent here from Water heater will keep opening this page\'s address. Send it to another page instead?');
+    await ask.locator('#f-to').selectOption('water-shutoff');
+    await ask.locator('button[type=submit]').click();
+    await page.waitForSelector('.toast.show >> text=Deleted. Water heater\'s sticker opens Main water shutoff.');
+    assert.equal(await doc('panel-main'), null, 'a page with no sticker of its own left a record behind');
+    assert.equal((await doc('water-heater')).to, 'water-shutoff');
+    assert.deepEqual(await row(), ['Water heater', 'sticker → Main water shutoff', 'locked']);
+    // an import file with the page in it leaves it out, as one deleted here
+    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('text=Import')]);
+    await chooser.setFiles({ name: 'p.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ docs: [{ id: 'water-heater', name: 'Water heater', kind: 'water' }] })) });
+    await page.waitForSelector('.toast.show >> text=/left out 1 you deleted/');
+    assert.equal((await doc('water-heater')).to, 'water-shutoff', 'an import put the page back over its sticker\'s record');
+    // from the Edit list: sent to the front page instead
+    await page.click('.sent-on .row');
+    let sheet = page.getByRole('dialog', { name: 'Water heater\'s sticker' });
+    await sheet.waitFor();
+    assert.equal(await sheet.locator('#f-to').inputValue(), 'water-shutoff');
+    await sheet.locator('#f-to').selectOption('house');
+    await sheet.locator('button[type=submit]').click();
+    await page.waitForFunction(() => document.querySelector('.sent-on .row .s')?.textContent === 'sticker → the front page');
+    await settled();
+    await page.goto(base + '#water-heater');
+    await page.waitForSelector('.urgent-tile');
+    assert.equal(new URL(page.url()).hash, '#house');
+    // a tenant: the record comes with the manual, so the sticker goes there for them too, and with no signal from their copy
+    const t = await phone(browser, base);
+    try {
+      t.L.site = structuredClone(L.site);
+      await t.page.goto(base + '#water-heater');
+      await t.page.waitForSelector('.urgent-tile');
+      assert.equal(new URL(t.page.url()).hash, '#house');
+      t.L.down = true;
+      await t.page.goto('about:blank');
+      await t.page.goto(base + '#water-heater');
+      await t.page.waitForSelector('.stale');
+      assert.equal(await t.page.locator('.urgent-tile').count(), 3);
+      assert.equal(new URL(t.page.url()).hash, '#house', 'offline, the tenant\'s copy didn\'t send the sticker on');
+      assert.deepEqual(t.errors, []);
+    } finally { await t.ctx.close(); }
+    // stopped: its address says the page isn't in the manual, with Make this page
+    await page.goto(base + '#/owner');
+    await page.click('.sent-on .row');
+    await sheet.waitFor();
+    await sheet.locator('button.danger').click();
+    const stop = page.getByRole('dialog', { name: 'Stop sending Water heater\'s sticker?' });
+    await stop.waitFor();
+    await stop.locator('button[type=submit]').click();
+    await page.waitForFunction(() => !document.querySelector('.sent-on'));
+    assert.equal(await doc('water-heater'), null);
+    await page.goto(base + '#water-heater');
+    await page.waitForSelector('text=This sticker\'s page isn\'t in the manual yet.');
+    assert.equal(await page.locator('text=Make this page').count(), 1);
+    // Nowhere: deleted as before, with no record
+    await page.goto(base + '#smoke-co');
+    await page.waitForSelector('.tape >> text=Smoke and CO alarms');
+    ask = await del('Smoke and CO alarms');
+    await ask.locator('#f-to').selectOption('');
+    await ask.locator('button[type=submit]').click();
+    await page.waitForSelector('.toast.show >> text=Deleted.');
+    assert.equal(await doc('smoke-co'), null);
+    assert.equal(await page.locator('.sent-on').count(), 0);
+    assert.deepEqual(errors, [], 'errors while sending stickers on');
+  } finally { await ctx.close(); }
+}
+
 export async function configChecks({ browser, base, assert }) {
   for (const [config, notice, said] of [
     [false, /^Tenants can't see this yet\. Put the ledger address in js\/config\.js in the repo \(Part 1 of the guide\)\.$/, 'Saved. Tenants see it once js/config.js has the ledger address.'],
@@ -821,6 +938,7 @@ export async function appChecks({ page, ctx, base, assert, problems }) {
   }
   await tenantChecks({ browser: ctx.browser(), base, assert });
   await ownerChecks({ browser: ctx.browser(), base, assert });
+  await forwardChecks({ browser: ctx.browser(), base, assert });
   await secondOwnerChecks({ browser: ctx.browser(), base, assert });
   await oddRecordChecks({ browser: ctx.browser(), base, assert });
   await retryChecks({ browser: ctx.browser(), base, assert });
