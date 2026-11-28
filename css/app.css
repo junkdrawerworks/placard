@@ -21,6 +21,7 @@ ol.steps li::before { content: counter(st); position: absolute; left: 12px; top:
 .report .btns .btn { max-width: 100%; overflow-wrap: anywhere; } /* "Email <a long address>" when no name was left */
 .call-now { display: block; min-height: 44px; text-decoration: none; } /* the report form's urgent line: all of it dials */
 .call-now b { font-weight: 600; text-decoration: underline; }
+.call-911 { font-weight: 600; } .sos .call-911 { margin-bottom: 10px; } /* Fire, smoke or a CO alarm: …, then call 911 */
 .sent { margin: -6px 0 14px; }
 .unsent { margin: -6px 0 14px; } .unsent .btns { margin: 6px 0 0; } /* a report typed here that hasn't gone */
 .notice .btns { margin: 10px 0 0; } .notice.warn .btn.ghost { border-color: var(--warn); color: var(--ink); } /* Try again */

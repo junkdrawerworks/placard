@@ -194,6 +194,60 @@ export async function tenantChecks({ browser, base, assert }) {
 
 // A tenant whose read fails: the page says so with a Try again button, and reads again by itself when the signal comes
 // back; a phone with a copy shows it, says how old it is, and the line goes after the next good read.
+// A fire or a CO alarm: 911 first. The front page's In an emergency starts with a fixed 911 line, and so does an
+// emergency page in the Safety group, whose report form's urgent line then says 911; every other page, an emergency one
+// elsewhere included, keeps the house contact's number. The line is a 44 px band that dials 911 all over.
+export async function fireChecks({ browser, base, assert }) {
+  const { ctx, L, errors, page } = await phone(browser, base);
+  const text = sel => page.locator(sel).first().evaluate(el => el.textContent.replace(/\s+/g, ' ').trim());
+  const FIRE = 'Fire, smoke or a CO alarm: get everyone out, then call 911.';
+  const urgent = async () => { await page.click('text=Report a problem'); const u = [await text('dialog[open] .call-now'), await page.locator('dialog[open] a.call-now').getAttribute('href')];
+    await page.click('dialog[open] >> text=Cancel'); await page.waitForSelector('dialog[open]', { state: 'detached' }); return u; };
+  try {
+    await page.goto(base);
+    await page.waitForSelector('.urgent-tile');
+    // at the top of In an emergency, before the tiles
+    assert.deepEqual(await page.locator('section.sos').evaluate(s => [...s.children].map(c => c.tagName + (c.className ? '.' + c.className.split(' ').join('.') : ''))),
+      ['H2', 'A.notice.bad.call-now.call-911', 'DIV.urgent']);
+    assert.equal(await text('section.sos .call-911'), FIRE);
+    assert.equal(await page.locator('section.sos .call-911').getAttribute('href'), 'tel:911');
+    const band = await page.locator('section.sos .call-911').evaluate(el => [el.getBoundingClientRect().height >= 44, el.getBoundingClientRect().width === el.parentElement.getBoundingClientRect().width]);
+    assert.deepEqual(band, [true, true], 'the 911 line isn\'t a band that dials all over');
+    assert.deepEqual(await urgent(), ['Urgent? Call 555-0142 now.', 'tel:5550142'], 'the front page\'s report form');
+    // the smoke and CO alarms (Safety, emergency): the line under the name, and 911 in the report form
+    await page.goto(base + '#smoke-co');
+    await page.waitForSelector('.tape >> text=Smoke and CO alarms');
+    assert.equal(await page.locator('.tape-wrap + a.call-911').count(), 1, 'no 911 line under the page\'s name');
+    assert.equal(await text('a.call-911'), FIRE);
+    assert.deepEqual(await urgent(), ['Urgent? Call 911 now.', 'tel:911'], 'the alarm page\'s report form');
+    // an emergency page in another group, and a page that isn't one: the house number, and no 911 line
+    for (const [id, name] of [['panel-main', 'Main electrical panel'], ['water-heater', 'Water heater']]) {
+      await page.goto(base + '#' + id);
+      await page.waitForSelector(`.tape >> text=${name}`);
+      assert.equal(await page.locator('a.call-911').count(), 0, `a 911 line on ${name}`);
+      assert.deepEqual(await urgent(), ['Urgent? Call 555-0142 now.', 'tel:5550142'], name);
+    }
+    // a manual with no phone number for the house: the alarm page's form still says 911, the others have no urgent line
+    L.site = L.site.map(d => d.id === 'house' ? { ...d, contact: { name: 'Riverbend Property Care', email: 'help@example.com' } } : d);
+    await page.evaluate(() => localStorage.clear());
+    await page.goto(base + '#smoke-co'); await page.reload();
+    await page.waitForSelector('.tape >> text=Smoke and CO alarms');
+    assert.deepEqual(await urgent(), ['Urgent? Call 911 now.', 'tel:911'], 'no 911 line without a house phone');
+    await page.goto(base + '#water-heater');
+    await page.waitForSelector('.tape >> text=Water heater');
+    await page.click('text=Report a problem');
+    assert.equal(await page.locator('dialog[open] .call-now').count(), 0, 'an urgent line with no number to call');
+    await page.click('dialog[open] >> text=Cancel');
+    // a manual with pages but no emergency ones still has the line
+    L.site = L.site.map(d => ({ ...d, emergency: false }));
+    await page.evaluate(() => localStorage.clear());
+    await page.goto(base); await page.reload();
+    await page.waitForSelector('text=Water heater');
+    assert.deepEqual([await page.locator('section.sos .call-911').count(), await page.locator('.urgent-tile').count()], [1, 0]);
+    assert.deepEqual(errors, []);
+  } finally { await ctx.close(); }
+}
+
 export async function retryChecks({ browser, base, assert }) {
   const { ctx, L, errors, page } = await phone(browser, base);
   // no signal as the phone sees it: navigator.onLine is false while the cookie offline=1 is set
@@ -943,6 +997,7 @@ export async function appChecks({ page, ctx, base, assert, problems }) {
     for (let i = problems.length - 1; i >= 0; i--) if (/script\.google\.com|ERR_NAME_NOT_RESOLVED/.test(problems[i])) problems.splice(i, 1);
   }
   await tenantChecks({ browser: ctx.browser(), base, assert });
+  await fireChecks({ browser: ctx.browser(), base, assert });
   await ownerChecks({ browser: ctx.browser(), base, assert });
   await forwardChecks({ browser: ctx.browser(), base, assert });
   await secondOwnerChecks({ browser: ctx.browser(), base, assert });

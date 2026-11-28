@@ -123,7 +123,7 @@ export const SAMPLE = {
     { id: 'air-handler-up', name: 'Air handler, upstairs', kind: 'heat', order: 4, where: 'Attic hatch in the hall closet.',
       summary: 'Heats and cools the upstairs.', facts: [['Filter', '16 × 25 × 1'], ['Changed', 'Every 3 months']], care: 'Spare filters are on the shelf beside it.' },
     { id: 'smoke-co', name: 'Smoke and CO alarms', kind: 'safety', emergency: true, order: 5, where: 'Every bedroom, both hallways, the basement.',
-      summary: 'Wired together: when one sounds, they all do.', steps: 'Smoke or CO alarm: get everyone out, then call 911.\nA chirp every minute is a low battery: tell us and we will replace it.' },
+      summary: 'Wired together: when one sounds, they all do.', steps: 'Burnt toast: press the button on the alarm that sounded to quiet it, and open a window.\nA chirp every minute is a low battery: tell us and we will replace it.' },
   ],
   'placard.reports': [
     { id: 'r1', system: 'water-heater', systemName: 'Water heater', kind: 'Problem', name: 'Sam', contact: '555-0101', text: 'Small drip from the valve on the side.', at: '2026-11-20T15:04:00Z', status: 'new' },

@@ -131,6 +131,12 @@ function staleNotice() {
 }
 
 // ---------------------------------------------------------------- tenant pages
+// The fixed line for a fire or a CO alarm, where 911 comes before the house contact: at the top of In an emergency on the
+// front page, and on an emergency page in the Safety group (the smoke and CO alarms), whose report form then says 911
+// too. The whole band dials, a target a thumb can't miss.
+const FIRE = 'Fire, smoke or a CO alarm: get everyone out, then call 911.';
+const lifeSafety = s => !!s?.emergency && group(s) === 'safety';
+const fireLine = () => h('a', { class: 'notice bad call-now call-911', href: 'tel:911' }, 'Fire, smoke or a CO alarm: get everyone out, then ', h('b', {}, 'call 911'), '.');
 // Call and Text dial the first number written, without an extension (dial()); the button shows all of it.
 function contactCard(c) {
   if (!c || !(c.phone || c.email)) return null;
@@ -153,8 +159,8 @@ function renderHome() {
   return [
     h('div', { class: 'tape-wrap' }, h('span', { class: 'tape-cap' }, 'Welcome'), h('div', { class: 'tape' }, hs.title || 'House manual')),
     hs.intro ? h('p', { class: 'lead' }, hs.intro) : null,
-    urgent.length ? h('section', {}, h('h2', {}, 'In an emergency'),
-      h('div', { class: 'urgent' }, urgent.map(s => h('a', { class: 'urgent-tile', href: '#' + s.id }, h('b', {}, s.name), h('span', {}, s.where || ''))))) : null,
+    list.length ? h('section', { class: 'sos' }, h('h2', {}, 'In an emergency'), fireLine(),
+      urgent.length ? h('div', { class: 'urgent' }, urgent.map(s => h('a', { class: 'urgent-tile', href: '#' + s.id }, h('b', {}, s.name), h('span', {}, s.where || '')))) : null) : null,
     contactCard(hs.contact),
     reportButton(null, 'Report a problem'),
     KINDS.map(([k, label]) => {
@@ -179,6 +185,7 @@ function renderSystem(s) {
   return [
     h('p', { class: 'crumb' }, h('a', { href: '#' }, '‹ ' + (hs.title || 'House manual'))),
     h('div', { class: 'tape-wrap' }, h('span', { class: 'tape-cap' }, KINDS.find(k => k[0] === group(s))[1]), h('div', { class: 'tape' }, s.name)),
+    lifeSafety(s) ? fireLine() : null,
     s.where ? h('p', { class: 'where' }, h('b', {}, 'Where: '), s.where) : null,
     s.summary ? h('p', { class: 'lead' }, s.summary) : null,
     s.warn ? h('div', { class: 'notice warn' }, h('p', {}, s.warn)) : null,
@@ -265,6 +272,8 @@ function reportButton(s, label) {
 
 function report(s) {
   const key = s?.id || '', c = house().contact || {}, tel = dial(c.phone), was = draftOf(key) || {};
+  // the urgent line: 911 on the smoke and CO alarm page (and any emergency page under Safety), the house contact elsewhere
+  const urgent = lifeSafety(s) ? { tel: '911', said: 'Call 911 now' } : tel ? { tel, said: `Call ${c.phone} now` } : null;
   const field = (name, label, input, hint) => h('label', { class: 'field', for: 'f-' + name }, h('span', {}, label), input, hint ? h('small', {}, hint) : null);
   const kind = h('select', { id: 'f-kind', name: 'kind' }, ['Problem', 'Service visit', 'Question'].map(o => h('option', { value: o, selected: o === was.kind }, o)));
   const text = h('textarea', { id: 'f-text', name: 'text', rows: 4, required: true, placeholder: s?.name ? `About the ${s.name.toLowerCase()}…` : '' });
@@ -285,7 +294,7 @@ function report(s) {
   const dlg = h('dialog', { class: 'sheet', 'aria-labelledby': 'report-title' });
   const form = h('form', { method: 'dialog' },
     // the whole amber band is the link, a target a thumb can't miss
-    tel ? h('a', { class: 'notice warn call-now', href: 'tel:' + tel }, 'Urgent? ', h('b', {}, `Call ${c.phone} now`), '.') : null,
+    urgent ? h('a', { class: 'notice warn call-now', href: 'tel:' + urgent.tel }, 'Urgent? ', h('b', {}, urgent.said), '.') : null,
     field('kind', 'This is', kind),
     field('text', 'What happened', text),
     field('name', 'Your name', name),
