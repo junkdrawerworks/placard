@@ -1,6 +1,6 @@
 // Placard: a house manual on stickers. Tenants tap a sticker and get that system's page with no app and no sign-in;
 // the owner, connected to the ledger, edits the pages, writes and locks the stickers and reads the reports.
-import { $, h, mount, toast, sheet, confirmSheet, route, go, stampText, qrSvg, loadQr, today, held, sampleLink, onRoute, dayText } from './kit/ui.js';
+import { $, h, mount, toast, sheet, confirmSheet, route, go, stampText, qrSvg, loadQr, today, held, sampleLink, onRoute, dayText, saveFile, bringBack } from './kit/ui.js';
 import { Ledger, watchConnectLinks, publicRead, publicReport, refusal, importSummary, STILL_LOADING } from './kit/ledger.js';
 import { tagUrl } from './kit/tags.js';
 import { nfcPanel } from './kit/panel.js';
@@ -624,24 +624,40 @@ async function addFromStarter() {
 
 // An import file ({ docs: [...] }, or a list of pages) only fills in (mergeImport): a new page is added, one here gets
 // what's blank in it and details it doesn't have, and a Where line, contact or detail typed here is never blanked or
-// replaced. A page deleted here stays deleted; one in the wrong shape is skipped and named.
+// replaced. A page deleted here stays deleted; one in the wrong shape is skipped and named. A copy from Save a copy
+// (copy: { app, saved }) is a way back after a mistake: the pages it has that were deleted here since are offered back,
+// each ticked, and one brought back is put whole (a page whose sticker was sent elsewhere takes its address back).
 function importFacts() {
   const input = h('input', { type: 'file', accept: '.json,application/json' });
   input.addEventListener('change', async () => {
     if (!ledger.synced('site')) { toast(STILL_LOADING, 'bad'); return; }
     await ledger.catchUp(['site']);
-    let merged;
+    let merged, data;
     try {
-      const data = JSON.parse(await input.files[0].text());
+      data = JSON.parse(await input.files[0].text());
       const docs = Array.isArray(data) ? data : data?.docs;
       if (!Array.isArray(docs)) throw new Error('no pages');
-      merged = mergeImport(docs, id => ledger.doc('site', id), id => ledger.gone('site', id) || sendsOn(ledger.doc('site', id)));
+      merged = mergeImport(docs, id => ledger.doc('site', id), id => ledger.gone('site', id) || sendsOn(ledger.doc('site', id)), { back: copyOf(data, 'placard') });
     } catch { toast('That file isn\'t a Placard import.', 'bad'); return; }
+    const back = merged.back.length ? await bringBack(merged.back.map(d => ({ key: d.id, label: d.id === 'house' ? 'The front page' : d.name })), copyOf(data, 'placard').saved, ['page', 'pages']) : [];
     for (const doc of merged.puts) ledger.put('site', doc);
+    for (const doc of merged.back) if (back.includes(doc.id)) ledger.put('site', doc);
     fromLedger(); render();
-    toast(importSummary(merged.res, ['page', 'pages']), merged.res.skipped.length ? 'bad' : '');
+    toast(importSummary({ ...merged.res, back: back.length, gone: merged.res.gone + merged.back.length - back.length }, ['page', 'pages']), merged.res.skipped.length ? 'bad' : '');
   });
   input.click();
+}
+
+// A file from Save a copy says so: { copy: { app, saved }, docs }. Its copy part, or null for any other import file.
+const copyOf = (data, app) => data && typeof data === 'object' && !Array.isArray(data) && data.copy?.app === app ? data.copy : null;
+// Save a copy: every page and the front page as a file Import reads back, for a way back after a mistake. Stickers sent
+// to another page aren't pages, and the reports stay in the ledger.
+function saveCopy() {
+  const docs = ledger.docs('site').filter(d => !sendsOn(d)).map(d => Object.fromEntries(Object.entries(d).filter(([k]) => !k.startsWith('_'))))
+    .sort((a, b) => (b.id === 'house') - (a.id === 'house') || (Number(a.order) || 99) - (Number(b.order) || 99) || a.id.localeCompare(b.id));
+  const name = `placard-copy-${today()}.json`;
+  saveFile(name, { copy: { app: 'placard', saved: new Date().toISOString() }, docs });
+  toast(`Saved ${name}: ${docs.filter(d => d.id !== 'house').length} pages and the front page. Import reads it back.`);
 }
 
 function renderOwner() {
@@ -657,7 +673,8 @@ function renderOwner() {
       h('a', { class: 'btn ghost', href: '#/print' }, 'QR stickers'),
       h('a', { class: 'btn ghost', href: '#/manual' }, 'Print the manual'),
       h('a', { class: 'btn ghost', href: '#/reports' }, `Reports${reports.length ? ' (' + reports.length + ')' : ''}`),
-      h('button', { type: 'button', class: 'btn ghost', disabled: !!wait, onclick: importFacts }, 'Import')),
+      h('button', { type: 'button', class: 'btn ghost', disabled: !!wait, onclick: importFacts }, 'Import'),
+      h('button', { type: 'button', class: 'btn ghost', disabled: !!wait, onclick: saveCopy }, 'Save a copy')),
     wait ? h('p', { class: 'empty' }, wait) : null,
     h('ul', { class: 'list' }, list.map(s => h('li', {}, h('a', { class: 'row', href: '#' + s.id },
       h('span', { class: 'main' }, h('span', { class: 't' }, s.name), h('span', { class: 's' }, s.where || 'No location yet')),

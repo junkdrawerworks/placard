@@ -560,6 +560,66 @@ export async function manualChecks({ browser, base, assert }) {
   } finally { await ctx.close(); }
 }
 
+// Save a copy, beside Import: every page and the front page as a file Import reads back (stickers sent elsewhere stay out).
+// After mistakes (a Where line blanked, a page deleted, a locked page deleted with its sticker sent to the front page),
+// the copy imported fills the blank back in and offers both pages back, each ticked; brought back, the locked page takes
+// its address back from the front page.
+export async function copyChecks({ browser, base, assert }) {
+  const { ctx, L, errors, page } = await phone(browser, base);
+  await ctx.addInitScript(u => localStorage.setItem('placard.ledger', JSON.stringify({ url: u, key: 'k'.repeat(40) })), LEDGER);
+  L.site = L.site.map(d => d.id === 'water-heater' ? { ...d, tagged: '2026-11-20', locked: '2026-11-20' } : d);
+  const doc = id => page.evaluate(id => window.__placard.ledger.doc('site', id), id);
+  try {
+    await page.goto(base + '#/owner');
+    await page.waitForSelector('.list .row');
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('text=Save a copy')]);
+    assert.match(dl.suggestedFilename(), /^placard-copy-\d{4}-\d{2}-\d{2}\.json$/);
+    const copy = JSON.parse(await readFile(await dl.path(), 'utf8'));
+    assert.equal(copy.copy.app, 'placard');
+    assert.deepEqual(copy.docs.map(d => d.id), ['house', 'water-shutoff', 'water-heater', 'panel-main', 'air-handler-up', 'smoke-co']);
+    assert.deepEqual(copy.docs.filter(d => Object.keys(d).some(k => k.startsWith('_'))), [], 'the ledger\'s own fields went in the copy');
+    assert.deepEqual(copy.docs.find(d => d.id === 'water-heater').locked, '2026-11-20');
+    await page.waitForSelector(`.toast.show >> text=Saved ${dl.suggestedFilename()}: 5 pages and the front page. Import reads it back.`);
+    // the mistakes
+    await page.goto(base + '#water-shutoff');
+    await page.click('text=Edit this page');
+    await page.fill('#f-where', '');
+    await page.click('dialog[open] button[type=submit]');
+    await page.waitForFunction(() => !document.querySelector('.where'));
+    for (const [id, name] of [['air-handler-up', 'Air handler, upstairs'], ['water-heater', 'Water heater']]) {
+      await page.goto(base + '#' + id);
+      await page.click('text=Edit this page');
+      await page.click('dialog[open] button.danger');
+      await page.getByRole('dialog', { name: `Delete ${name}?` }).locator('button[type=submit]').click();
+      await page.waitForSelector('h2 >> text=Edit the manual');
+    }
+    assert.equal((await doc('water-heater')).to, 'house');
+    // a copy that isn't Placard's is just an import file: Mothball's
+    const [wrong] = await Promise.all([page.waitForEvent('filechooser'), page.click('text=Import')]);
+    await wrong.setFiles({ name: 'mothball-copy.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ copy: { app: 'mothball', saved: copy.copy.saved }, totes: [] })) });
+    await page.waitForSelector('.toast.show >> text=That file isn\'t a Placard import.');
+    // the copy imported
+    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('text=Import')]);
+    await chooser.setFiles({ name: dl.suggestedFilename(), mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(copy)) });
+    const ask = page.getByRole('dialog', { name: 'Bring back 2 pages?' });
+    await ask.waitFor();
+    assert.deepEqual(await ask.locator('.pick span').allTextContents(), ['Water heater', 'Air handler, upstairs']);
+    assert.deepEqual(await ask.locator('.pick input').evaluateAll(bs => bs.map(b => b.checked)), [true, true]);
+    await ask.locator('button', { hasText: 'Bring back' }).click();
+    await page.waitForSelector('.toast.show >> text=Filled in 1, brought back 2.');
+    const wh = await doc('water-heater');
+    assert.deepEqual([wh.to, wh.name, wh.locked], [undefined, 'Water heater', '2026-11-20'], 'the locked page didn\'t come back whole');
+    assert.equal((await doc('air-handler-up')).name, 'Air handler, upstairs');
+    assert.equal((await doc('water-shutoff')).where, 'Basement, left of the pressure tank, at waist height.');
+    assert.equal(await page.locator('.sent-on').count(), 0, 'the sticker is still listed as sent elsewhere');
+    // and its sticker's address opens its own page again
+    await page.goto(base + '#water-heater');
+    await page.waitForSelector('.tape >> text=Water heater');
+    assert.equal(new URL(page.url()).hash, '#water-heater');
+    assert.deepEqual(errors, []);
+  } finally { await ctx.close(); }
+}
+
 export async function retryChecks({ browser, base, assert }) {
   const { ctx, L, errors, page } = await phone(browser, base);
   // no signal as the phone sees it: navigator.onLine is false while the cookie offline=1 is set
@@ -1034,13 +1094,13 @@ export async function secondOwnerChecks({ browser, base, assert }) {
     await page.goto(base + '#/owner');
     await page.waitForSelector('#app .empty >> text=Loading…');
     const off = () => page.locator('#app > .btns button').evaluateAll(bs => bs.map(b => [b.textContent, b.disabled]));
-    assert.deepEqual(await off(), [['House and contact', true], ['Add a system', true], ['Import', true]], 'a new page offered before the ledger answered');
+    assert.deepEqual(await off(), [['House and contact', true], ['Add a system', true], ['Import', true], ['Save a copy', true]], 'a new page, or a copy, offered before the ledger answered');
     await page.goto(base + '#attic');
     assert.equal(await page.locator('text=Make this page').count(), 0, 'Make this page offered before the ledger answered');
     await page.goto(base + '#/owner');
     await page.waitForFunction(() => document.querySelector('.sync')?.textContent === 'Up to date', null, { timeout: 10000 });
     await page.locator('#app button:enabled', { hasText: 'Add a system' }).waitFor({ timeout: 2000 });
-    assert.deepEqual(await off(), [['House and contact', false], ['Add a system', false], ['Import', false]]);
+    assert.deepEqual(await off(), [['House and contact', false], ['Add a system', false], ['Import', false], ['Save a copy', false]]);
     L.delay = 0;
     await page.click('text=Add a system');
     const offered = await page.locator('dialog[open] #f-pick option').evaluateAll(os => os.map(o => o.value));
@@ -1313,6 +1373,7 @@ export async function appChecks({ page, ctx, base, assert, problems }) {
   await photoChecks({ browser: ctx.browser(), base, assert });
   await doneChecks({ browser: ctx.browser(), base, assert });
   await manualChecks({ browser: ctx.browser(), base, assert });
+  await copyChecks({ browser: ctx.browser(), base, assert });
   await numbersChecks({ browser: ctx.browser(), base, assert });
   await ownerChecks({ browser: ctx.browser(), base, assert });
   await forwardChecks({ browser: ctx.browser(), base, assert });

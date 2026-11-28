@@ -189,3 +189,15 @@ test('an import\'s every N months is a whole number, typed as digits or not', ()
   assert.equal(checkPage({ id: 'air', name: 'Air', every: 'quarterly' }).why, '"air" (its every isn\'t a whole number of months)');
   assert.equal(checkPage({ id: 'air', name: 'Air', lastDone: 20260802 }).why, '"air" (its lastDone isn\'t text)');
 });
+
+test('a saved copy imported: pages deleted here since, or whose sticker was sent elsewhere, are offered back whole', () => {
+  const docs = [{ id: 'house', title: 'House manual' }, { id: 'water-heater', name: 'Water heater', where: 'Basement', tagged: '2026-11-20', locked: '2026-11-20' },
+    { id: 'attic', name: 'Attic fan', where: 'Attic' }, { id: 'water-shutoff', name: 'Main water shutoff', where: 'Basement, left of the tank' }, { id: 'nameless' }];
+  const here = { house: docs[0], 'water-shutoff': { id: 'water-shutoff', name: 'Main water shutoff', where: '' } };
+  const gone = id => ['water-heater', 'attic', 'nameless'].includes(id);
+  const r = mergeImport(docs, id => here[id] || null, gone, { back: true });
+  assert.deepEqual(r.back, [docs[1], docs[2]], 'a page deleted here since the copy wasn\'t offered back whole');
+  assert.deepEqual(r.puts.map(d => [d.id, d.where]), [['water-shutoff', 'Basement, left of the tank']]);
+  assert.equal(r.res.gone, 1, 'a page with no name can\'t come back, and counts as left out');
+  assert.deepEqual(mergeImport(docs, id => here[id] || null, gone).back, [], 'an import file that isn\'t a copy offered a deleted page back');
+});

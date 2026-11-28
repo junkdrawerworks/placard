@@ -220,9 +220,10 @@ export function mergeFacts(here, file) {
 
 // An import file's pages over this phone's. here(id) is the page here, gone(id) true for one deleted here. Each page
 // only fills in (the kit's fillIn): a Where line, a contact field or a detail typed here is never blanked or replaced,
-// and a page deleted here stays deleted. Returns { puts, res } (res for the kit's importSummary).
-export function mergeImport(docs, here, gone) {
-  const puts = [], mine = {}, res = { added: 0, filled: 0, kept: 0, gone: 0, skipped: [] };
+// and a page deleted here stays deleted. Returns { puts, res, back } (res for the kit's importSummary). With back (the
+// file is a saved copy), a page deleted here goes in back instead, whole, for the app to offer to bring back.
+export function mergeImport(docs, here, gone, { back = false } = {}) {
+  const puts = [], mine = {}, res = { added: 0, filled: 0, kept: 0, gone: 0, skipped: [] }, offer = [];
   for (const d of docs) {
     const c = checkPage(d);
     if (c.why) { res.skipped.push(c.why); continue; }
@@ -230,7 +231,10 @@ export function mergeImport(docs, here, gone) {
     // h/home is the front page's other sticker address, never a page of its own (the front page is the house doc): a
     // page saved there would be counted as added and never shown, so it's skipped and named
     if (id === 'home') { res.skipped.push('"home" (the front page\'s own address; the front page is "house")'); continue; }
-    if (gone(id) && !mine[id]) { res.gone++; continue; }
+    if (gone(id) && !mine[id]) {
+      if (back && typeof c.rec.name === 'string' && c.rec.name.trim() && !refusal(c.rec) && !offer.some(d => d.id === id)) offer.push(c.rec); else res.gone++;
+      continue;
+    }
     const was = mine[id] || here(id);
     const { doc, filled, kept } = was ? fillIn(was, c.rec, { facts: mergeFacts }) : { doc: c.rec, filled: [], kept: [] };
     if (id !== 'house' && (typeof doc.name !== 'string' || !doc.name.trim())) { res.skipped.push(`"${id}" (no name)`); continue; }
@@ -239,5 +243,5 @@ export function mergeImport(docs, here, gone) {
     if (kept.length && !mine[id]) res.kept++;
     if (!was || filled.length) { mine[id] = doc; puts.push(doc); }
   }
-  return { puts, res };
+  return { puts, res, back: offer };
 }
