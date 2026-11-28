@@ -565,8 +565,14 @@ async function editNumber(n) {
     if (save({ ...house(), id: 'house', numbers: list.filter(x => x.id !== n.id) })) saidSaved('house');
     return;
   }
+  // a new number's id is new to the pages too: a page that picked a deleted number still names it (and shows the house
+  // contact), and would show a new one that took the same id
   let id = n?.id;
-  if (!id) { const base = v.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || 'number'; id = base; for (let i = 2; list.some(x => x.id === id); i++) id = `${base}-${i}`; }
+  if (!id) {
+    const base = v.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || 'number';
+    const taken = x => list.some(m => m.id === x) || site.some(d => d.call === x);
+    id = base; for (let i = 2; taken(id); i++) id = `${base}-${i}`;
+  }
   const doc = { id, name: v.name, phone: v.phone, note: v.note };
   if (save({ ...house(), id: 'house', numbers: n ? list.map(x => x.id === n.id ? doc : x) : [...list, doc] })) saidSaved('house');
 }

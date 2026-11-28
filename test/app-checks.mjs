@@ -341,6 +341,19 @@ export async function numbersChecks({ browser, base, assert }) {
     await page.goto(base + '#water-heater');
     await page.waitForSelector('.contact .who');
     assert.deepEqual((await card(page)).who, ['Riverbend Property Care']);
+    // a new number with the same name never takes the id the water heater still names: its card stays the house's
+    await page.goto(base + '#/owner');
+    await page.click('text=Add a number');
+    await page.fill('#f-name', 'Acme Septic');
+    await page.fill('#f-phone', '800-555-0199');
+    await page.click('dialog[open] button[type=submit]');
+    await page.waitForFunction(() => document.querySelectorAll('section.numbers .row').length === 2);
+    await settled();
+    assert.deepEqual(L.puts.at(-1).numbers.map(n => n.id), ['backup-lee', 'acme-septic-2']);
+    assert.deepEqual(await page.locator('section.numbers .row .s').allTextContents(), ['555-0177', '800-555-0199'], 'the new number is on a card it was never picked for');
+    await page.goto(base + '#water-heater');
+    await page.waitForSelector('.contact .who');
+    assert.deepEqual((await card(page)).who, ['Riverbend Property Care'], 'a page that had the deleted number shows the new one');
     assert.deepEqual(errors, []);
   } finally { await ctx.close(); }
 }
