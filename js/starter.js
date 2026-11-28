@@ -134,7 +134,7 @@ export const SAMPLE = {
 // A page from an import file, checked before it goes in: { rec } (its id as a sticker reads it, its details as
 // [label, value] pairs) or { why }, naming it for the toast.
 const PAGE_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
-const TEXT = ['title', 'intro', 'notes', 'name', 'where', 'kind', 'summary', 'steps', 'care', 'warn', 'manual'];
+const TEXT = ['title', 'intro', 'notes', 'name', 'where', 'kind', 'summary', 'steps', 'care', 'warn', 'manual', 'call'];
 export function checkPage(d) {
   if (!d || typeof d !== 'object' || Array.isArray(d)) return { why: 'a line that isn\'t a page' };
   const id = typeof d.id === 'string' ? d.id.trim().toLowerCase() : '';
@@ -147,6 +147,9 @@ export function checkPage(d) {
   if (rec.facts) rec.facts = rec.facts.map(([k = '', v = '']) => [k.trim(), v.trim()]).filter(([k, v]) => k || v);
   if (rec.contact != null && (typeof rec.contact !== 'object' || Array.isArray(rec.contact) || Object.values(rec.contact).some(x => x != null && typeof x !== 'string')))
     return { why: `"${id}" (its contact isn't name, phone, email and note)` };
+  if (rec.numbers != null && (!Array.isArray(rec.numbers) || !rec.numbers.every(n => n && typeof n === 'object' && !Array.isArray(n) && typeof n.id === 'string' && n.id
+    && Object.values(n).every(x => x == null || typeof x === 'string'))))
+    return { why: `"${id}" (its other numbers aren't name, phone and when to call)` };
   return { rec };
 }
 

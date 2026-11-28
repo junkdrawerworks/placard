@@ -34,6 +34,9 @@ const systems = () => site.filter(d => !FRONT.has(d.id) && !sendsOn(d)).sort((a,
 const sys = id => FRONT.has(id) ? null : site.find(d => d.id === id && !sendsOn(d));
 const sentOn = () => site.filter(sendsOn).sort((a, b) => String(a.name).localeCompare(String(b.name)));
 const sentFrom = id => site.find(d => d.id === id && sendsOn(d));
+// The house's other numbers, and the one a page shows on its card (s.call: a number's id), or null: the house contact.
+const numbers = () => house().numbers || [];
+const numberOf = s => (s?.call && numbers().find(n => n.id === s.call)) || null;
 // Where a sticker sent elsewhere lands: its record's page, or where that one's sticker was sent in turn (a few steps at
 // most, so two records sending to each other can't go round for ever). A page, the front page, or a page gone.
 function landing(id) {
@@ -54,7 +57,11 @@ function normal(d) {
   if (sendsOn(d)) return { ...d, to: d.to.toLowerCase(), name: typeof d.name === 'string' && d.name.trim() ? d.name : d.id };
   if (d.id === 'house') {
     const c = d.contact && typeof d.contact === 'object' && !Array.isArray(d.contact) ? d.contact : null;
-    return c ? { ...d, contact: { name: str(c.name), phone: str(c.phone), email: str(c.email), note: str(c.note) } } : d;
+    // Other numbers (the septic company, the outage line, a backup): each { id, name, phone, note }; one typed into the
+    // sheet without a name goes by its id, and anything that isn't one is left out
+    const numbers = (Array.isArray(d.numbers) ? d.numbers : []).filter(n => n && typeof n === 'object' && typeof n.id === 'string' && n.id)
+      .map(n => ({ id: n.id, name: str(n.name).trim() || n.id, phone: str(n.phone), note: str(n.note) }));
+    return { ...d, ...(c ? { contact: { name: str(c.name), phone: str(c.phone), email: str(c.email), note: str(c.note) } } : {}), numbers };
   }
   const named = typeof d.name === 'string' && d.name.trim() ? d.name : '';
   return { ...d, name: named || (d.id.charAt(0).toUpperCase() + d.id.slice(1)).replace(/-/g, ' '),
@@ -138,18 +145,32 @@ const FIRE = 'Fire, smoke or a CO alarm: get everyone out, then call 911.';
 const lifeSafety = s => !!s?.emergency && group(s) === 'safety';
 const fireLine = () => h('a', { class: 'notice bad call-now call-911', href: 'tel:911' }, 'Fire, smoke or a CO alarm: get everyone out, then ', h('b', {}, 'call 911'), '.');
 // Call and Text dial the first number written, without an extension (dial()); the button shows all of it.
-function contactCard(c) {
-  if (!c || !(c.phone || c.email)) return null;
+// One person or company on the card: its name (who, when given: "Or Riverbend Property Care"), when to call, and Call,
+// with Text and Email for the house contact (an outage line or a septic company may not take a text).
+function person(c, { main = true, text = true, who = c.name } = {}) {
   const tel = dial(c.phone);
-  return h('section', { class: 'card contact' },
-    h('h2', {}, 'Who to call'),
-    h('p', { class: 'who' }, c.name || ''),
+  return [
+    h('p', { class: 'who' }, who || ''),
     c.note ? h('p', { class: 'muted' }, c.note) : null,
     c.phone && !tel ? h('p', {}, c.phone) : null,
     h('div', { class: 'btns' },
-      tel ? h('a', { class: 'btn', href: 'tel:' + tel }, 'Call ' + c.phone) : null,
-      tel ? h('a', { class: 'btn ghost', href: 'sms:' + tel }, 'Text') : null,
-      c.email ? h('a', { class: 'btn ghost', href: 'mailto:' + c.email }, 'Email') : null));
+      tel ? h('a', { class: main ? 'btn' : 'btn ghost', href: 'tel:' + tel }, 'Call ' + c.phone) : null,
+      tel && text ? h('a', { class: 'btn ghost', href: 'sms:' + tel }, 'Text') : null,
+      c.email ? h('a', { class: 'btn ghost', href: 'mailto:' + c.email }, 'Email') : null)];
+}
+const reachable = c => !!(c && (c.phone || c.email));
+// Who to call. On the front page: the house contact, then the house's other numbers, each with when to call. On a page
+// that picked one of them (the septic page, the septic company): that number first, and the house contact under it. A
+// page with none, or whose number has since been deleted: the house contact, as before.
+function contactCard(c, { others = [], first = null } = {}) {
+  others = others.filter(n => n.phone);
+  if (first?.phone) return h('section', { class: 'card contact' }, h('h2', {}, 'Who to call'), person(first, { text: false }),
+    reachable(c) ? h('div', { class: 'also' }, person(c, { main: false, who: 'Or ' + (c.name || 'the house contact') })) : null);
+  if (!reachable(c) && !others.length) return null;
+  return h('section', { class: 'card contact' },
+    h('h2', {}, 'Who to call'),
+    reachable(c) ? person(c) : null,
+    others.length ? [h('h3', {}, 'Other numbers'), h('ul', { class: 'others' }, others.map(n => h('li', {}, person(n, { main: false, text: false }))))] : null);
 }
 
 function renderHome() {
@@ -161,7 +182,7 @@ function renderHome() {
     hs.intro ? h('p', { class: 'lead' }, hs.intro) : null,
     list.length ? h('section', { class: 'sos' }, h('h2', {}, 'In an emergency'), fireLine(),
       urgent.length ? h('div', { class: 'urgent' }, urgent.map(s => h('a', { class: 'urgent-tile', href: '#' + s.id }, h('b', {}, s.name), h('span', {}, s.where || '')))) : null) : null,
-    contactCard(hs.contact),
+    contactCard(hs.contact, { others: numbers() }),
     reportButton(null, 'Report a problem'),
     KINDS.map(([k, label]) => {
       const in_ = list.filter(s => group(s) === k);
@@ -196,7 +217,7 @@ function renderSystem(s) {
     s.manual ? h('p', {}, h('a', { class: 'btn ghost', href: s.manual, target: '_blank', rel: 'noopener' }, 'The manual')) : null,
     // the starter's pages are blank until the owner walks the house: say so rather than show an empty page
     !(s.where || s.summary || s.warn || steps.length || facts.length || s.care || s.manual) ? h('p', { class: 'empty' }, 'Nothing written here yet. Call or report below.') : null,
-    contactCard(hs.contact),
+    contactCard(hs.contact, { first: numberOf(s) }),
     reportButton(s, 'Report a problem or log a visit'),
     owner() ? ownerTools(s) : null,
   ];
@@ -405,7 +426,8 @@ const tenantNotice = () => {
 async function editSystem(s) {
   const exists = !!(s?._updated && sys(s.id));   // a sticker page's stub has no saved time: always a new page
   const made = v => ({ ...(s || {}), id: s?.id || uniqueId(v.name), name: v.name, where: v.where, kind: v.kind, emergency: v.emergency === 'yes', summary: v.summary,
-    steps: v.steps, facts: parseFacts(v.facts), care: v.care, warn: v.warn, manual: v.manual, order: Number(v.order) || 99 });
+    steps: v.steps, facts: parseFacts(v.facts), care: v.care, warn: v.warn, manual: v.manual, order: Number(v.order) || 99,
+    ...(v.call != null ? { call: v.call } : {}) });
   // a Save that can't go keeps the sheet open with everything typed: too long, an id the ledger refuses, or the ledger
   // not heard from yet
   const check = v => {
@@ -426,7 +448,10 @@ async function editSystem(s) {
     { name: 'warn', label: 'Warning (shown in amber)', type: 'textarea', rows: 2, value: s?.warn },
     { name: 'manual', label: 'Link to the manual', type: 'url', value: s?.manual },
     { name: 'order', label: 'Order on the page', type: 'number', value: s?.order ?? systems().length + 1, inputmode: 'numeric' },
-  ] });
+    // once the house has other numbers: which one this page's card shows (a number since deleted reads as the first)
+    numbers().length ? { name: 'call', label: 'Number on its card', type: 'select', value: numberOf(s)?.id || '',
+      options: [['', `Who to call${house().contact?.name ? ` (${house().contact.name})` : ''}`], ...numbers().map(n => [n.id, n.name])] } : null,
+  ].filter(Boolean) });
   if (!v) return;
   if (v.__danger) { await deletePage(s); return; }
   const doc = made(v), id = doc.id;
@@ -467,6 +492,30 @@ async function deletePage(s) {
 }
 // "Boiler", "Boiler and Old fridge", "Boiler, Well and Old fridge"
 const andList = names => names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+
+// One of the house's other numbers, added or changed from the Edit screen, saved on the house doc; Delete asks first and
+// says which pages' cards go back to the house contact.
+async function editNumber(n) {
+  const v = await sheet({ title: n ? n.name : 'Another number', danger: n ? 'Delete' : null,
+    check: v => !site.some(d => d.id === 'house') && !ledger.synced('site') ? STILL_LOADING : !dial(v.phone) ? { line: 'Put in a phone number to call.', field: 'phone' } : '',
+    fields: [
+      { name: 'name', label: 'Who', value: n?.name, required: true, placeholder: 'Septic company' },
+      { name: 'phone', label: 'Phone', type: 'tel', value: n?.phone },
+      { name: 'note', label: 'When to call', type: 'textarea', rows: 2, value: n?.note, placeholder: 'The septic alarm sounds, or a drain backs up' }] });
+  if (!v) return;
+  const list = numbers();
+  if (v.__danger) {
+    const used = systems().filter(s => s.call === n.id), c = house().contact || {};
+    if (!await confirmSheet(`Delete ${n.name}?`, used.length ? `${andList(used.map(s => s.name))} will show ${c.name || 'the house contact'} on ${used.length > 1 ? 'their cards' : 'its card'} instead.`
+      : 'It goes from the front page\'s Who to call.', 'Delete', { danger: true })) return;
+    if (save({ ...house(), id: 'house', numbers: list.filter(x => x.id !== n.id) })) saidSaved('house');
+    return;
+  }
+  let id = n?.id;
+  if (!id) { const base = v.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || 'number'; id = base; for (let i = 2; list.some(x => x.id === id); i++) id = `${base}-${i}`; }
+  const doc = { id, name: v.name, phone: v.phone, note: v.note };
+  if (save({ ...house(), id: 'house', numbers: n ? list.map(x => x.id === n.id ? doc : x) : [...list, doc] })) saidSaved('house');
+}
 
 // A sticker sent elsewhere, from the Edit list: where it goes, changed, or not sent anywhere any more (its address then
 // says the page isn't in the manual, with Make this page for the owner).
@@ -562,6 +611,11 @@ function renderOwner() {
       h('span', { class: 'main' }, h('span', { class: 't' }, s.name), h('span', { class: 's' }, s.where || 'No location yet')),
       h('span', { class: 'chips' }, s.facts.some(([, v]) => !v.trim()) ? h('span', { class: 'chip warn' }, 'blank details') : null,
         h('span', { class: 'chip ' + (s.locked ? 'ok' : s.tagged ? 'warn' : '') }, s.locked ? 'locked' : s.tagged ? 'written' : 'no tag')))))),
+    wait ? null : h('section', { class: 'numbers' }, h('h3', {}, 'Other numbers'),
+      numbers().length ? h('ul', { class: 'list' }, numbers().map(n => h('li', {}, h('button', { type: 'button', class: 'row', onclick: fresh(() => editNumber(n)) },
+        h('span', { class: 'main' }, h('span', { class: 't' }, n.name), h('span', { class: 's' }, [n.phone, usedOn(n)].filter(Boolean).join(' · ')))))))
+        : h('p', { class: 'muted' }, 'The septic company, the power company\'s outage line, a backup if the manager doesn\'t answer: shown under Who to call, and a page can show one on its card instead.'),
+      h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn ghost', onclick: fresh(() => editNumber(null)) }, 'Add a number'))),
     !wait && sentOn().length ? h('section', {}, h('h3', {}, 'Stickers sent to another page'),
       h('ul', { class: 'list sent-on' }, sentOn().map(f => h('li', {}, h('button', { type: 'button', class: 'row', onclick: () => editSent(f) },
         h('span', { class: 'main' }, h('span', { class: 't' }, f.name), h('span', { class: 's' }, `sticker → ${pageName(landing(f.id))}`)),
@@ -569,6 +623,9 @@ function renderOwner() {
     wait ? null : frontTag(),
   ];
 }
+
+// "on Septic system's card", "on 2 pages' cards"
+const usedOn = n => { const on = systems().filter(s => s.call === n.id); return !on.length ? '' : on.length === 1 ? `on ${on[0].name}'s card` : `on ${on.length} pages' cards`; };
 
 // The front page's own sticker (h/house): the whole manual, for inside the front door. Written and locked like a
 // system's, and saved on the house doc.

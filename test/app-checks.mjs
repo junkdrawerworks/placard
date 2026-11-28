@@ -248,6 +248,87 @@ export async function fireChecks({ browser, base, assert }) {
   } finally { await ctx.close(); }
 }
 
+// Other numbers: the house gets more than one number (the septic company, a backup), added from the Edit screen and shown
+// under Who to call on the front page; a page can pick one for its card, which then names the house contact under it.
+// A page that picked none, or whose number was deleted, shows the house contact as before; tenants see the same.
+export async function numbersChecks({ browser, base, assert }) {
+  const { ctx, L, errors, page } = await phone(browser, base);
+  await ctx.addInitScript(u => localStorage.setItem('placard.ledger', JSON.stringify({ url: u, key: 'k'.repeat(40) })), LEDGER);
+  const settled = () => page.waitForFunction(() => /^(Saved|Up to date)$/.test(document.querySelector('.sync')?.textContent));
+  const card = p => p.locator('.contact').evaluate(c => ({ who: [...c.querySelectorAll('.who')].map(e => e.textContent), heads: [...c.querySelectorAll('h3')].map(e => e.textContent),
+    links: [...c.querySelectorAll('a')].map(a => [a.textContent, a.getAttribute('href'), a.className]) }));
+  try {
+    await page.goto(base + '#/owner');
+    await page.waitForSelector('section.numbers');
+    assert.match(await page.locator('section.numbers p.muted').textContent(), /^The septic company, the power company's outage line/);
+    // added: a phone number is needed
+    await page.click('text=Add a number');
+    await page.fill('#f-name', 'Hudson Septic');
+    await page.click('dialog[open] button[type=submit]');
+    await page.waitForSelector('dialog[open] .sheet-msg >> text=Put in a phone number to call.');
+    await page.fill('#f-phone', '845-555-0170');
+    await page.fill('#f-note', 'The septic alarm sounds, or a drain backs up.');
+    await page.click('dialog[open] button[type=submit]');
+    await page.waitForSelector('section.numbers .row');
+    await settled();
+    assert.deepEqual(L.puts.at(-1).numbers, [{ id: 'hudson-septic', name: 'Hudson Septic', phone: '845-555-0170', note: 'The septic alarm sounds, or a drain backs up.' }]);
+    assert.equal(L.puts.at(-1).contact.phone, '555-0142', 'the house contact changed');
+    await page.click('text=Add a number');
+    await page.fill('#f-name', 'Backup: Lee');
+    await page.fill('#f-phone', '555-0177');
+    await page.click('dialog[open] button[type=submit]');
+    await page.waitForFunction(() => document.querySelectorAll('section.numbers .row').length === 2);
+    // a page picks one for its card
+    await page.goto(base + '#water-heater');
+    await page.click('text=Edit this page');
+    assert.deepEqual(await page.locator('#f-call option').allTextContents(), ['Who to call (Riverbend Property Care)', 'Hudson Septic', 'Backup: Lee']);
+    assert.equal(await page.inputValue('#f-call'), '');
+    await page.selectOption('#f-call', 'hudson-septic');
+    await page.click('dialog[open] button[type=submit]');
+    await page.waitForFunction(() => document.querySelector('.contact .who')?.textContent === 'Hudson Septic');
+    assert.deepEqual(await card(page), { who: ['Hudson Septic', 'Or Riverbend Property Care'], heads: [],
+      links: [['Call 845-555-0170', 'tel:8455550170', 'btn'], ['Call 555-0142', 'tel:5550142', 'btn ghost'], ['Text', 'sms:5550142', 'btn ghost'], ['Email', 'mailto:help@example.com', 'btn ghost']] });
+    // the report form's urgent line stays the house contact's
+    await page.click('text=Report a problem or log a visit');
+    assert.equal(await page.locator('dialog[open] .call-now').textContent(), 'Urgent? Call 555-0142 now.');
+    await page.click('dialog[open] >> text=Cancel');
+    await page.goto(base + '#/owner');
+    await page.waitForSelector('section.numbers .row');
+    assert.deepEqual(await page.locator('section.numbers .row .s').allTextContents(), ['845-555-0170 · on Water heater\'s card', '555-0177']);
+    // the front page: the house contact, then the other numbers, each with when to call and Call
+    await page.goto(base + '#');
+    await page.waitForSelector('.contact h3');
+    assert.deepEqual(await card(page), { who: ['Riverbend Property Care', 'Hudson Septic', 'Backup: Lee'], heads: ['Other numbers'],
+      links: [['Call 555-0142', 'tel:5550142', 'btn'], ['Text', 'sms:5550142', 'btn ghost'], ['Email', 'mailto:help@example.com', 'btn ghost'],
+        ['Call 845-555-0170', 'tel:8455550170', 'btn ghost'], ['Call 555-0177', 'tel:5550177', 'btn ghost']] });
+    // a tenant sees the same
+    await settled();
+    const tenant = await phone(browser, base);
+    tenant.L.site = L.site;
+    await tenant.page.goto(base + '#water-heater');
+    await tenant.page.waitForSelector('.contact .who');
+    assert.deepEqual((await card(tenant.page)).who, ['Hudson Septic', 'Or Riverbend Property Care']);
+    await tenant.page.goto(base);
+    await tenant.page.waitForSelector('.contact h3');
+    assert.deepEqual((await card(tenant.page)).who, ['Riverbend Property Care', 'Hudson Septic', 'Backup: Lee']);
+    assert.deepEqual(tenant.errors, []);
+    await tenant.ctx.close();
+    // deleted: asked first, naming the page whose card goes back to the house contact
+    await page.goto(base + '#/owner');
+    await page.click('section.numbers .row >> text=Hudson Septic');
+    await page.click('dialog[open] button.danger');
+    const ask = page.getByRole('dialog', { name: 'Delete Hudson Septic?' });
+    await ask.waitFor();
+    assert.equal(await ask.locator('form > p').textContent(), 'Water heater will show Riverbend Property Care on its card instead.');
+    await ask.locator('button[type=submit]').click();
+    await page.waitForFunction(() => document.querySelectorAll('section.numbers .row').length === 1);
+    await page.goto(base + '#water-heater');
+    await page.waitForSelector('.contact .who');
+    assert.deepEqual((await card(page)).who, ['Riverbend Property Care']);
+    assert.deepEqual(errors, []);
+  } finally { await ctx.close(); }
+}
+
 export async function retryChecks({ browser, base, assert }) {
   const { ctx, L, errors, page } = await phone(browser, base);
   // no signal as the phone sees it: navigator.onLine is false while the cookie offline=1 is set
@@ -998,6 +1079,7 @@ export async function appChecks({ page, ctx, base, assert, problems }) {
   }
   await tenantChecks({ browser: ctx.browser(), base, assert });
   await fireChecks({ browser: ctx.browser(), base, assert });
+  await numbersChecks({ browser: ctx.browser(), base, assert });
   await ownerChecks({ browser: ctx.browser(), base, assert });
   await forwardChecks({ browser: ctx.browser(), base, assert });
   await secondOwnerChecks({ browser: ctx.browser(), base, assert });

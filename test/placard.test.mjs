@@ -148,3 +148,11 @@ test('an import with a page under "home" (the front page\'s other address) skips
   assert.deepEqual(puts.map(d => d.id), ['house', 'water-heater']);
   assert.deepEqual(res, { added: 2, filled: 0, kept: 0, gone: 0, skipped: ['"home" (the front page\'s own address; the front page is "house")', '"home" (the front page\'s own address; the front page is "house")'] });
 });
+
+test('an import\'s other numbers are a list of name, phone and when to call, each with an id', () => {
+  const ok = checkPage({ id: 'house', numbers: [{ id: 'septic', name: 'Hudson Septic', phone: '845-555-0170', note: '' }] });
+  assert.deepEqual(ok.rec.numbers, [{ id: 'septic', name: 'Hudson Septic', phone: '845-555-0170', note: '' }]);
+  for (const numbers of ['Hudson Septic 845-555-0170', [{ name: 'No id', phone: '555-0101' }], [{ id: 'x', phone: 5550101 }], [['x', 'y']]])
+    assert.equal(checkPage({ id: 'house', numbers }).why, '"house" (its other numbers aren\'t name, phone and when to call)', JSON.stringify(numbers));
+  assert.equal(checkPage({ id: 'septic', name: 'Septic', call: 3 }).why, '"septic" (its call isn\'t text)');
+});
