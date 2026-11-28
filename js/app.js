@@ -191,9 +191,10 @@ const keepDraft = (key, v) => {
   if (v && (v.text || v.name || v.contact)) all[key] = { ...v, at: Date.now() }; else delete all[key];
   jset(DRAFTS, all);
 };
-// Sends a report from this page (s: the page, or null for the front page); resolves to whether the owner was emailed,
-// or throws if it didn't go. The draft goes once the ledger has it. One send per page at a time: a form closed while
-// its report is on the way leaves the line under the button saying Sending…, so the same report can't go twice.
+// Sends a report from this page (s: the page, or null for the front page); resolves to what the ledger said
+// ({ emailed, repeat, firstAt }: repeat when the same words went from this page in the last hour, and weren't emailed
+// again), or throws if it didn't go. The draft goes once the ledger has it. One send per page at a time: a form closed
+// while its report is on the way leaves the line under the button saying Sending…, so the same report can't go twice.
 const sending = {};
 function sendReport(s, v, website = '') {
   const key = s?.id || '';
@@ -202,14 +203,16 @@ function sendReport(s, v, website = '') {
     const doc = { kind: v.kind, text: v.text, name: v.name, contact: v.contact, website, system: s?.id || '', systemName: s?.name || '' };
     const j = demo ? ledger.demo.handle({ op: 'report', app: 'placard', coll: 'reports', doc })
       : await publicReport(owner() ? ledger.cfg.url : LEDGER_URL, 'placard', 'reports', doc);
-    const emailed = j?.emailed !== false;  // a ledger script before 1.1 doesn't say: it always tried
+    const done = { at: Date.now(), emailed: j?.emailed !== false };  // a ledger script before 1.1 doesn't say: it always tried
+    if (j?.repeat) Object.assign(done, { repeat: true, firstAt: Date.parse(j.firstAt) || 0 });
     keepDraft(key, null);
-    sent[key] = { at: Date.now(), emailed };
+    sent[key] = done;
     try { sessionStorage.setItem('placard.sent', JSON.stringify(sent)); } catch {}
-    return emailed;
+    return done;
   })()).finally(() => { delete sending[key]; render(); });
 }
-const sentToast = emailed => toast(emailed ? 'Sent. The owner gets it by email.' : 'Saved for the owner. If it\'s urgent, call.');
+const already = d => d.firstAt ? `Already sent at ${clock(d.firstAt)}. If it's urgent, call.` : 'Already sent. If it\'s urgent, call.';
+const sentToast = d => toast(d.repeat ? already(d) : d.emailed ? 'Sent. The owner gets it by email.' : 'Saved for the owner. If it\'s urgent, call.');
 const failLine = err => /too many/.test(err.message) ? 'Too many reports this hour. Your message is kept: please call.' : 'Couldn\'t send it. Your message is kept: try again, or call.';
 // "No hot water since the power cut this…"
 const excerpt = t => (t.length > 40 ? t.slice(0, 40).replace(/\s+\S*$/, '') + '…' : t);
@@ -229,12 +232,12 @@ function reportButton(s, label) {
     h('div', { class: 'btns' }, sending[key] ? h('button', { type: 'button', class: 'btn', disabled: true }, 'Sending…') : h('button', { type: 'button', class: 'btn', onclick: async e => {
       const b = e.currentTarget;
       b.disabled = true; b.textContent = 'Sending…';
-      try { const emailed = await sendReport(s, kept); render(); sentToast(emailed); }
+      try { const done = await sendReport(s, kept); render(); sentToast(done); }
       catch (err) { b.disabled = false; b.textContent = 'Send it now'; toast(failLine(err), 'bad'); }
     } }, 'Send it now'))) : null;
   return [
     h('div', { class: 'btns stack' }, h('button', { type: 'button', class: 'btn ghost wide', onclick: () => report(s) }, label)),
-    unsent || (done ? h('p', { class: 'msg ok sent' }, done.emailed ? `Sent to the owner at ${clock(done.at)}.` : `Saved for the owner at ${clock(done.at)}. If it's urgent, call.`) : null),
+    unsent || (done ? h('p', { class: 'msg ok sent' }, done.repeat ? already(done) : done.emailed ? `Sent to the owner at ${clock(done.at)}.` : `Saved for the owner at ${clock(done.at)}. If it's urgent, call.`) : null),
   ];
 }
 
@@ -278,10 +281,10 @@ function report(s) {
     keepDraft(key, v);
     send.disabled = true; send.textContent = 'Sending…'; say(''); sms.hidden = true;
     try {
-      const emailed = await sendReport(s, v, trap.value);
+      const done = await sendReport(s, v, trap.value);
       if (dlg.open) dlg.close();
       render();
-      sentToast(emailed);
+      sentToast(done);
     } catch (err) {
       send.disabled = false; send.textContent = 'Send';
       const line = failLine(err);
