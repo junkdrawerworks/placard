@@ -1,11 +1,12 @@
 // Placard: a house manual on stickers. Tenants tap a sticker and get that system's page with no app and no sign-in;
 // the owner, connected to the ledger, edits the pages, writes and locks the stickers and reads the reports.
-import { $, h, mount, toast, sheet, confirmSheet, route, go, stampText, qrSvg, loadQr, today, held, sampleLink, onRoute } from './kit/ui.js';
+import { $, h, mount, toast, sheet, confirmSheet, route, go, stampText, qrSvg, loadQr, today, held, sampleLink, onRoute, dayText } from './kit/ui.js';
 import { Ledger, watchConnectLinks, publicRead, publicReport, refusal, importSummary, STILL_LOADING } from './kit/ledger.js';
 import { tagUrl } from './kit/tags.js';
 import { nfcPanel } from './kit/panel.js';
 import { LEDGER_URL } from './config.js';
-import { KINDS, STARTER, SAMPLE, parseFacts, factsText, lines, mergeImport, dial, splitLinks, reachBy, groupReports, clock, timeSpan, photoName } from './starter.js';
+import { KINDS, STARTER, SAMPLE, parseFacts, factsText, lines, mergeImport, dial, splitLinks, reachBy, groupReports, clock, timeSpan, photoName,
+  isoDay, everyOf, nextDue, isDue, job, doneText } from './starter.js';
 
 const params = new URLSearchParams(location.search);
 const demo = params.has('demo');
@@ -250,10 +251,13 @@ function renderSystem(s) {
     steps.length ? h('section', {}, h('h2', {}, 'What to do'), h('ol', { class: 'steps' }, steps.map(l => h('li', {}, linked(l))))) : null,
     facts.length ? h('section', { class: 'card' }, h('h2', {}, 'Details'), h('dl', { class: 'facts' }, facts.map(([k, v]) =>
       !k ? h('dd', { class: 'whole' }, linked(v)) : [h('dt', {}, k), v ? h('dd', {}, linked(v)) : h('dd', { class: 'blank' }, 'to fill in')]))) : null,
-    s.care ? h('section', {}, h('h2', {}, 'Looking after it'), lines(s.care).map(l => h('p', {}, linked(l)))) : null,
+    s.care || doneText(s) ? h('section', {}, h('h2', {}, 'Looking after it'), lines(s.care).map(l => h('p', {}, linked(l))),
+      doneText(s) ? h('p', { class: 'done' }, doneText(s)) : null,
+      // the owner also sees when it's next due
+      owner() && nextDue(s) ? h('p', { class: 'msg due ' + (isDue(s, today()) ? 'bad' : '') }, `${isDue(s, today()) ? 'Due since' : 'Next due'} ${dayText(nextDue(s))}.`) : null) : null,
     s.manual ? h('p', {}, h('a', { class: 'btn ghost', href: s.manual, target: '_blank', rel: 'noopener' }, 'The manual')) : null,
     // the starter's pages are blank until the owner walks the house: say so rather than show an empty page
-    !(s.where || photoName(s.photo) || s.summary || s.warn || steps.length || facts.length || s.care || s.manual) ? h('p', { class: 'empty' }, 'Nothing written here yet. Call or report below.') : null,
+    !(s.where || photoName(s.photo) || s.summary || s.warn || steps.length || facts.length || s.care || doneText(s) || s.manual) ? h('p', { class: 'empty' }, 'Nothing written here yet. Call or report below.') : null,
     contactCard(hs.contact, { first: numberOf(s) }),
     reportButton(s, 'Report a problem or log a visit'),
     owner() ? ownerTools(s) : null,
@@ -464,6 +468,7 @@ async function editSystem(s) {
   const exists = !!(s?._updated && sys(s.id));   // a sticker page's stub has no saved time: always a new page
   const made = v => ({ ...(s || {}), id: s?.id || uniqueId(v.name), name: v.name, where: v.where, kind: v.kind, emergency: v.emergency === 'yes', summary: v.summary,
     steps: v.steps, facts: parseFacts(v.facts), care: v.care, warn: v.warn, manual: v.manual, order: Number(v.order) || 99, photo: photoName(v.photo) || '',
+    task: v.task, every: everyOf(v.every) || '', lastDone: isoDay(v.lastDone),
     ...(v.call != null ? { call: v.call } : {}) });
   // a Save that can't go keeps the sheet open with everything typed: too long, an id the ledger refuses, or the ledger
   // not heard from yet
@@ -471,6 +476,7 @@ async function editSystem(s) {
     if (!exists && !ledger.synced('site')) return STILL_LOADING;
     if (s?.id && FRONT.has(s.id)) return `"${s.id}" is the front page's own address: pick another.`;
     if (photoName(v.photo) === null) return { line: 'A photo is the name of a file in the photos folder, like water-shutoff.jpg (a .jpg, .png or .webp).', field: 'photo' };
+    if (v.every && !everyOf(v.every)) return { line: 'Every: a whole number of months, from 1 to 120.', field: 'every' };
     return refusedPage(made(v));
   };
   const v = await sheet({ title: exists ? 'Edit ' + s.name : 'New system', danger: exists ? 'Delete' : null, check, fields: [
@@ -485,6 +491,11 @@ async function editSystem(s) {
     { name: 'steps', label: 'What to do (one step per line)', type: 'textarea', rows: 4, value: s?.steps },
     { name: 'facts', label: 'Details (one "Label: value" per line)', type: 'textarea', rows: 4, value: factsText(s?.facts), placeholder: 'Model: XE50T10\nFilter: 16 × 25 × 1' },
     { name: 'care', label: 'Looking after it', type: 'textarea', value: s?.care },
+    { name: 'task', label: 'A regular job', value: s?.task, placeholder: 'Filter change',
+      hint: 'Tenants read "Last filter change: Nov 3, 2026. Every 3 months." Your Edit list says due once it\'s past.' },
+    // step any: a half or a 0 reaches the sheet's check, which says what it takes, instead of the browser's own bubble
+    { name: 'every', label: 'Every (months)', type: 'number', value: everyOf(s?.every) || '', inputmode: 'numeric', step: 'any' },
+    { name: 'lastDone', label: 'Last done', type: 'date', value: isoDay(s?.lastDone) },
     { name: 'warn', label: 'Warning (shown in amber)', type: 'textarea', rows: 2, value: s?.warn },
     { name: 'manual', label: 'Link to the manual', type: 'url', value: s?.manual },
     { name: 'order', label: 'Order on the page', type: 'number', value: s?.order ?? systems().length + 1, inputmode: 'numeric' },
@@ -650,6 +661,7 @@ function renderOwner() {
     h('ul', { class: 'list' }, list.map(s => h('li', {}, h('a', { class: 'row', href: '#' + s.id },
       h('span', { class: 'main' }, h('span', { class: 't' }, s.name), h('span', { class: 's' }, s.where || 'No location yet')),
       h('span', { class: 'chips' }, s.facts.some(([, v]) => !v.trim()) ? h('span', { class: 'chip warn' }, 'blank details') : null,
+        isDue(s, today()) ? h('span', { class: 'chip warn due' }, 'due') : null,
         h('span', { class: 'chip ' + (s.locked ? 'ok' : s.tagged ? 'warn' : '') }, s.locked ? 'locked' : s.tagged ? 'written' : 'no tag')))))),
     wait ? null : h('section', { class: 'numbers' }, h('h3', {}, 'Other numbers'),
       numbers().length ? h('ul', { class: 'list' }, numbers().map(n => h('li', {}, h('button', { type: 'button', class: 'row', onclick: fresh(() => editNumber(n)) },
@@ -708,7 +720,14 @@ function renderPrint() {
 // Call and Text, an email address Email, each with the person's name when the card holds more than one person's.
 function renderReports() {
   const cards = groupReports(ledger.docs('reports'));
-  const handle = c => { const at = Date.now(); for (const r of c.reports) if (r.status !== 'handled') ledger.put('reports', { ...r, status: 'handled', handled: today(), handledAt: at }); render(); };
+  // A service visit marked handled offers to set its page's Last done to the visit's day (unless that's no later than it).
+  const handle = async c => {
+    const at = Date.now();
+    for (const r of c.reports) if (r.status !== 'handled') ledger.put('reports', { ...r, status: 'handled', handled: today(), handledAt: at });
+    render();
+    const s = sys(c.first.system), t = Date.parse(c.last.at), day = today(Number.isFinite(t) ? new Date(t) : new Date());
+    if (s && c.reports.some(r => r.kind === 'Service visit') && !(isoDay(s.lastDone) >= day)) await offerLastDone(s, day);
+  };
   return [
     h('p', { class: 'crumb' }, h('a', { href: '#/owner' }, '‹ Edit')), h('h2', {}, 'Reports'),
     cards.length ? h('ul', { class: 'list' }, cards.map(c => {
@@ -729,6 +748,15 @@ function renderReports() {
           !c.handled ? h('button', { type: 'button', class: 'btn ghost', onclick: () => handle(c) }, 'Mark handled') : null) : null);
     })) : h('p', { class: 'empty' }, 'No reports yet.'),
   ];
+}
+
+// After a service visit is handled: its page's Last done, the visit's day unless changed. Not now leaves the page as it is.
+async function offerLastDone(s, day) {
+  const v = await sheet({ title: `${s.name}: set Last done?`, ok: 'Set it', cancel: 'Not now', fields: [
+    { name: 'day', label: s.task ? `Last ${job(s.task)}` : 'Last done', type: 'date', value: day,
+      hint: isoDay(s.lastDone) ? `The page says ${dayText(s.lastDone)} now.` : 'The page has no Last done date yet.' }] });
+  if (!v || !isoDay(v.day)) return;
+  if (save({ ...(sys(s.id) || s), lastDone: v.day })) { toast(`${s.name}: last done ${dayText(v.day)}.`); saidSaved(s.id); }
 }
 
 // A sticker whose page isn't in the manual (deleted, or never made): who to call, the report form and the front page

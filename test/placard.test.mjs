@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseFacts, factsText, lines, STARTER, SAMPLE, checkPage, mergeFacts, mergeImport, dial, splitLinks, reachBy, groupReports, timeSpan } from '../js/starter.js';
+import { parseFacts, factsText, lines, STARTER, SAMPLE, checkPage, mergeFacts, mergeImport, dial, splitLinks, reachBy, groupReports, timeSpan,
+  isoDay, everyOf, nextDue, isDue, job, doneText } from '../js/starter.js';
 
 test('details lines round-trip', () => {
   const f = parseFacts('Model: XE50T10\n\nFilter: 16 × 25 × 1\nno colon here\nTime: 3:30');
@@ -155,4 +156,36 @@ test('an import\'s other numbers are a list of name, phone and when to call, eac
   for (const numbers of ['Hudson Septic 845-555-0170', [{ name: 'No id', phone: '555-0101' }], [{ id: 'x', phone: 5550101 }], [['x', 'y']]])
     assert.equal(checkPage({ id: 'house', numbers }).why, '"house" (its other numbers aren\'t name, phone and when to call)', JSON.stringify(numbers));
   assert.equal(checkPage({ id: 'septic', name: 'Septic', call: 3 }).why, '"septic" (its call isn\'t text)');
+});
+
+test('a regular job: next due is Last done plus every N months, the day kept or the month\'s last', () => {
+  for (const [last, every, due] of [['2026-11-03', 3, '2027-02-03'], ['2026-08-31', 6, '2027-02-28'], ['2027-08-31', 6, '2028-02-29'], ['2026-01-31', 1, '2026-02-28'],
+    ['2026-12-15', 1, '2027-01-15'], ['2026-05-10', 12, '2027-05-10'], ['2026-05-10', 120, '2036-05-10'], ['2026-03-31', '2', '2026-05-31'], ['2026-03-31', ' 3 ', '2026-06-30']])
+    assert.equal(nextDue({ lastDone: last, every }), due, `${last} + ${JSON.stringify(every)}`);
+  // without both, or with either unreadable: never due
+  for (const p of [{}, { lastDone: '2026-11-03' }, { every: 3 }, { lastDone: '2026-02-30', every: 3 }, { lastDone: 'Nov 3', every: 3 }, { lastDone: '0999-01-01', every: 3 },
+    { lastDone: '2026-11-03', every: 0 }, { lastDone: '2026-11-03', every: 2.5 }, { lastDone: '2026-11-03', every: 121 }, { lastDone: '2026-11-03', every: '0x10' },
+    { lastDone: '2026-11-03', every: true }, { lastDone: '2026-11-03', every: '' }, { lastDone: '2026-11-03\n', every: 3 }])
+    assert.equal(nextDue(p), '', JSON.stringify(p));
+  assert.equal(isDue({ lastDone: '2026-08-02', every: 3 }, '2026-11-01'), false);
+  assert.equal(isDue({ lastDone: '2026-08-02', every: 3 }, '2026-11-02'), true, 'due on the day');
+  assert.equal(isDue({ every: 3 }, '2030-01-01'), false, 'never done reads as due');
+  assert.deepEqual([everyOf('3'), everyOf(3), everyOf('3.0'), everyOf('-3'), everyOf(null)], [3, 3, 3, 0, 0]);
+  assert.deepEqual([isoDay('2026-02-29'), isoDay('2028-02-29'), isoDay(' 2026-01-01')], ['', '2028-02-29', '']);
+});
+test('a regular job reads as a line for tenants', () => {
+  assert.equal(doneText({ task: 'Filter change', every: 3, lastDone: '2026-11-03' }), 'Last filter change: Nov 3, 2026. Every 3 months.');
+  assert.equal(doneText({ task: 'HVAC service', lastDone: '2026-11-03' }), 'Last HVAC service: Nov 3, 2026.');
+  assert.equal(doneText({ lastDone: '2026-11-03', every: 1 }), 'Last done: Nov 3, 2026. Every month.');
+  assert.equal(doneText({ task: '  Flush ', every: '12' }), 'Flush every 12 months.');
+  assert.equal(doneText({ every: 6 }), 'Every 6 months.');
+  assert.equal(doneText({ task: 'Filter change' }), '', 'a job with no date or months says nothing');
+  assert.equal(doneText({ task: 'Pump-out', every: 'often', lastDone: 'last spring' }), '');
+  assert.deepEqual([job('Filter change'), job('HVAC service'), job('A'), job('Élan check')], ['filter change', 'HVAC service', 'A', 'élan check']);
+});
+test('an import\'s every N months is a whole number, typed as digits or not', () => {
+  assert.equal(checkPage({ id: 'air', name: 'Air', every: '3' }).rec.every, 3);
+  assert.equal(checkPage({ id: 'air', name: 'Air', every: 6, lastDone: '2026-08-02', task: 'Filter change' }).rec.every, 6);
+  assert.equal(checkPage({ id: 'air', name: 'Air', every: 'quarterly' }).why, '"air" (its every isn\'t a whole number of months)');
+  assert.equal(checkPage({ id: 'air', name: 'Air', lastDone: 20260802 }).why, '"air" (its lastDone isn\'t text)');
 });

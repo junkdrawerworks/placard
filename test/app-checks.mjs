@@ -424,6 +424,85 @@ export async function photoChecks({ browser, base, assert }) {
   } finally { await off.setOffline(false).catch(() => {}); await off.close(); }
 }
 
+// A regular job on a page: what it is, every N months and Last done. Tenants read "Last filter change: …. Every 3
+// months."; the owner sees when it's next due, and a due chip in the Edit list once it's past. A Service visit report
+// marked handled offers to set Last done to the visit's day (not for a visit no later than the date already there).
+export async function doneChecks({ browser, base, assert }) {
+  const { ctx, L, errors, page } = await phone(browser, base);
+  await ctx.addInitScript(u => localStorage.setItem('placard.ledger', JSON.stringify({ url: u, key: 'k'.repeat(40) })), LEDGER);
+  // days around today, as the page counts them
+  const days = await page.evaluate(() => { const d = n => { const t = new Date(); t.setDate(t.getDate() + n); return new Date(t.getTime() - t.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+    const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], txt = s => { const [y, m, dd] = s.split('-').map(Number); return `${MON[m - 1]} ${dd}, ${y}`; };
+    return { ago100: d(-100), ago10: d(-10), ago3: d(-3), today: d(0), txt: Object.fromEntries([-100, -10, -3, 0].map(n => [d(n), txt(d(n))])) }; });
+  const row = name => page.locator('.list .row', { hasText: name });
+  try {
+    L.site = L.site.map(d => d.id === 'air-handler-up' ? { ...d, task: 'Filter change', every: 3, lastDone: days.ago100 } : d.id === 'water-heater' ? { ...d, lastDone: '', every: '' } : d);
+    await page.goto(base + '#/owner');
+    await page.waitForSelector('.list .row');
+    // past: a due chip; a page with no job: none
+    assert.equal(await row('Air handler, upstairs').locator('.chip.due').textContent(), 'due');
+    assert.equal(await row('Water heater').locator('.chip.due').count(), 0);
+    await page.goto(base + '#air-handler-up');
+    await page.waitForSelector('.done');
+    assert.equal(await page.locator('.done').textContent(), `Last filter change: ${days.txt[days.ago100]}. Every 3 months.`);
+    assert.match(await page.locator('.msg.due').textContent(), /^Due since [A-Z][a-z]{2} \d{1,2}, \d{4}\.$/);
+    assert.equal(await page.locator('.msg.due').getAttribute('class'), 'msg due bad');
+    // set on another page from its edit sheet: a whole number of months
+    await page.goto(base + '#water-heater');
+    await page.click('text=Edit this page');
+    await page.fill('#f-task', 'Flush');
+    await page.fill('#f-every', '2.5');
+    await page.click('dialog[open] button[type=submit]');
+    await page.waitForSelector('dialog[open] .sheet-msg >> text=Every: a whole number of months, from 1 to 120.');
+    await page.fill('#f-every', '12');
+    await page.fill('#f-lastDone', days.ago10);
+    await page.click('dialog[open] button[type=submit]');
+    await page.waitForFunction(t => document.querySelector('.done')?.textContent === t, `Last flush: ${days.txt[days.ago10]}. Every 12 months.`);
+    assert.match(await page.locator('.msg.due').textContent(), /^Next due /);
+    assert.deepEqual(await page.evaluate(() => { const d = window.__placard.ledger.doc('site', 'water-heater'); return [d.task, d.every, d.lastDone]; }), ['Flush', 12, days.ago10]);
+    // a tenant reads the line, without when it's due
+    await page.waitForFunction(() => /^(Saved|Up to date)$/.test(document.querySelector('.sync')?.textContent));
+    const tenant = await phone(browser, base);
+    tenant.L.site = L.site;
+    await tenant.page.goto(base + '#water-heater');
+    await tenant.page.waitForSelector('.done');
+    assert.deepEqual([await tenant.page.locator('.done').textContent(), await tenant.page.locator('.msg.due').count()], [`Last flush: ${days.txt[days.ago10]}. Every 12 months.`, 0]);
+    await tenant.ctx.close();
+    // a service visit, handled: offered as the page's Last done, on the visit's day
+    const visit = (id, system, day, kind = 'Service visit') => page.evaluate(([id, system, day, kind]) => { const { ledger, render } = window.__placard;
+      ledger.put('reports', { id, system, systemName: system, kind, name: 'Sam', contact: '', text: 'Changed the filter.', at: new Date(`${day}T15:00:00`).toISOString(), status: 'new' }); render(); }, [id, system, day, kind]);
+    await page.goto(base + '#/reports');
+    await visit('v1', 'air-handler-up', days.ago3);
+    await page.locator('.report', { hasText: 'Changed the filter.' }).locator('button', { hasText: 'Mark handled' }).click();
+    const ask = page.getByRole('dialog', { name: 'Air handler, upstairs: set Last done?' });
+    await ask.waitFor();
+    assert.deepEqual([await ask.locator('label span').first().textContent(), await ask.locator('#f-day').inputValue(), await ask.locator('small').textContent()],
+      ['Last filter change', days.ago3, `The page says ${days.txt[days.ago100]} now.`]);
+    assert.deepEqual(await ask.locator('.sheet-bar button').allTextContents(), ['Not now', 'Set it']);
+    await ask.locator('button', { hasText: 'Set it' }).click();
+    await page.waitForSelector(`.toast.show >> text=Air handler, upstairs: last done ${days.txt[days.ago3]}.`);
+    assert.equal(await page.evaluate(() => window.__placard.ledger.doc('site', 'air-handler-up').lastDone), days.ago3);
+    // and the due chip goes
+    await page.goto(base + '#/owner');
+    await page.waitForSelector('.list .row');
+    assert.equal(await row('Air handler, upstairs').locator('.chip.due').count(), 0, 'still due after Set it');
+    // Not now leaves it; a visit no later than Last done, or a report that isn't a visit, asks nothing
+    await page.goto(base + '#/reports');
+    await visit('v2', 'water-heater', days.today);
+    await page.locator('.report', { hasText: 'Changed the filter.' }).filter({ hasNot: page.locator('.dim') }).locator('button', { hasText: 'Mark handled' }).first().click();
+    await page.getByRole('dialog', { name: 'Water heater: set Last done?' }).locator('button', { hasText: 'Not now' }).click();
+    assert.equal(await page.evaluate(() => window.__placard.ledger.doc('site', 'water-heater').lastDone), days.ago10, 'Not now changed Last done');
+    for (const [id, sys, day, kind] of [['v3', 'air-handler-up', days.ago10, 'Service visit'], ['v4', 'water-heater', days.today, 'Problem']]) {
+      await visit(id, sys, day, kind);
+      await page.waitForFunction(() => [...document.querySelectorAll('.report:not(.dim) button')].some(b => b.textContent === 'Mark handled'));
+      await page.locator('.report:not(.dim) button', { hasText: 'Mark handled' }).first().click();
+      await page.waitForTimeout(400);
+      assert.equal(await page.locator('dialog[open]').count(), 0, `asked about ${id}`);
+    }
+    assert.deepEqual(errors, []);
+  } finally { await ctx.close(); }
+}
+
 export async function retryChecks({ browser, base, assert }) {
   const { ctx, L, errors, page } = await phone(browser, base);
   // no signal as the phone sees it: navigator.onLine is false while the cookie offline=1 is set
@@ -1175,6 +1254,7 @@ export async function appChecks({ page, ctx, base, assert, problems }) {
   await tenantChecks({ browser: ctx.browser(), base, assert });
   await fireChecks({ browser: ctx.browser(), base, assert });
   await photoChecks({ browser: ctx.browser(), base, assert });
+  await doneChecks({ browser: ctx.browser(), base, assert });
   await numbersChecks({ browser: ctx.browser(), base, assert });
   await ownerChecks({ browser: ctx.browser(), base, assert });
   await forwardChecks({ browser: ctx.browser(), base, assert });

@@ -1,7 +1,7 @@
 // The systems most houses have, as a starting list for the owner, and a made-up house for the sample mode; and how an
 // import file goes over the pages already here.
 import { fillIn, refusal } from './kit/ledger.js';
-import { lines } from './kit/ui.js';
+import { lines, dayText } from './kit/ui.js';
 export const KINDS = [
   ['water', 'Water'], ['power', 'Power'], ['heat', 'Heating and cooling'], ['safety', 'Safety'], ['appliance', 'Appliances'], ['other', 'Everything else'],
 ];
@@ -73,6 +73,41 @@ export function photoName(v) {
   return !s ? '' : PHOTO.test(s) && !s.includes('..') ? s : null;
 }
 
+// ---- a page's regular job: what it is (task), every N months (every) and when it was last done (lastDone)
+// A day as stored (YYYY-MM-DD, a real day of a four-digit year from 1000), or ''.
+export function isoDay(v) {
+  const m = /^([12]\d{3})-(\d{2})-(\d{2})$/.exec(String(v ?? ''));
+  if (!m) return '';
+  const [y, mo, d] = [+m[1], +m[2], +m[3]];
+  return mo >= 1 && mo <= 12 && d >= 1 && d <= new Date(Date.UTC(y, mo, 0)).getUTCDate() ? m[0] : '';
+}
+// Every N months: a whole number from 1 to 120, as a number or as digits typed into the sheet ('3'); 0 for anything else.
+export function everyOf(v) {
+  const n = typeof v === 'number' ? v : /^\s*\d+(?:\.0*)?\s*$/.test(String(v ?? '')) ? Number(v) : NaN;
+  return Number.isInteger(n) && n >= 1 && n <= 120 ? n : 0;
+}
+// When the job is next due: Last done plus every N months, the day kept or the month's last day (Aug 31 and 6 months is
+// Feb 28), as YYYY-MM-DD; '' without both. dispatch/placard_slip.py works it out the same way.
+export function nextDue(p) {
+  const n = everyOf(p?.every), d = isoDay(p?.lastDone);
+  if (!n || !d) return '';
+  const [y, m, day] = d.split('-').map(Number), k = m - 1 + n, Y = y + Math.floor(k / 12), M = k % 12 + 1;
+  const end = new Date(Date.UTC(Y, M, 0)).getUTCDate();
+  return `${Y}-${String(M).padStart(2, '0')}-${String(Math.min(day, end)).padStart(2, '0')}`;
+}
+// Due on that day or after it (today: YYYY-MM-DD).
+export const isDue = (p, today) => { const d = nextDue(p); return !!d && d <= today; };
+// 'Filter change' as it reads in a sentence: 'filter change' ('HVAC service' stays as it is).
+export const job = t => { const s = String(t ?? '').trim().replace(/\s+/g, ' '); return s.length > 1 && /\p{Ll}/u.test(s[1]) ? s[0].toLowerCase() + s.slice(1) : s; };
+// What a tenant reads under Looking after it: 'Last filter change: Nov 3, 2026. Every 3 months.', 'Last done: Nov 3,
+// 2026.', 'Filter change every 3 months.'; '' when the page has neither date nor months.
+export function doneText(p) {
+  const n = everyOf(p?.every), d = isoDay(p?.lastDone), t = String(p?.task ?? '').trim().replace(/\s+/g, ' ');
+  const months = n === 1 ? 'month' : `${n} months`;
+  if (d) return `Last ${t ? job(t) : 'done'}: ${dayText(d)}.${n ? ` Every ${months}.` : ''}`;
+  return !n ? '' : t ? `${t} every ${months}.` : `Every ${months}.`;
+}
+
 // ---- the Reports screen
 // How to answer a report: a phone number in its contact (Call and Text dial it, as the contact card's do) and an email
 // address. A contact that's only a number however it's typed ("5550101", "+1 845 555 0101") counts as a phone too.
@@ -130,7 +165,7 @@ export const SAMPLE = {
       summary: 'Every circuit in the house, with a map inside the door.', steps: 'A tripped breaker sits in the middle. Push it fully off, then on.\nIf it trips again straight away, leave it off and call.',
       facts: [['Size', '200 A'], ['Map', 'Inside the door']] },
     { id: 'air-handler-up', name: 'Air handler, upstairs', kind: 'heat', order: 4, where: 'Attic hatch in the hall closet.',
-      summary: 'Heats and cools the upstairs.', facts: [['Filter', '16 × 25 × 1'], ['Changed', 'Every 3 months']], care: 'Spare filters are on the shelf beside it.' },
+      summary: 'Heats and cools the upstairs.', facts: [['Filter', '16 × 25 × 1']], care: 'Spare filters are on the shelf beside it.', task: 'Filter change', every: 3, lastDone: '2026-08-02' },
     { id: 'smoke-co', name: 'Smoke and CO alarms', kind: 'safety', emergency: true, order: 5, where: 'Every bedroom, both hallways, the basement.',
       summary: 'Wired together: when one sounds, they all do.', steps: 'Burnt toast: press the button on the alarm that sounded to quiet it, and open a window.\nA chirp every minute is a low battery: tell us and we will replace it.' },
   ],
@@ -143,7 +178,7 @@ export const SAMPLE = {
 // A page from an import file, checked before it goes in: { rec } (its id as a sticker reads it, its details as
 // [label, value] pairs) or { why }, naming it for the toast.
 const PAGE_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
-const TEXT = ['title', 'intro', 'notes', 'name', 'where', 'kind', 'summary', 'steps', 'care', 'warn', 'manual', 'call', 'photo'];
+const TEXT = ['title', 'intro', 'notes', 'name', 'where', 'kind', 'summary', 'steps', 'care', 'warn', 'manual', 'call', 'photo', 'task', 'lastDone'];
 export function checkPage(d) {
   if (!d || typeof d !== 'object' || Array.isArray(d)) return { why: 'a line that isn\'t a page' };
   const id = typeof d.id === 'string' ? d.id.trim().toLowerCase() : '';
@@ -156,6 +191,10 @@ export function checkPage(d) {
   if (rec.facts) rec.facts = rec.facts.map(([k = '', v = '']) => [k.trim(), v.trim()]).filter(([k, v]) => k || v);
   if (rec.contact != null && (typeof rec.contact !== 'object' || Array.isArray(rec.contact) || Object.values(rec.contact).some(x => x != null && typeof x !== 'string')))
     return { why: `"${id}" (its contact isn't name, phone, email and note)` };
+  if (rec.every != null && rec.every !== '') {
+    if (!everyOf(rec.every)) return { why: `"${id}" (its every isn't a whole number of months)` };
+    rec.every = everyOf(rec.every);
+  }
   if (rec.numbers != null && (!Array.isArray(rec.numbers) || !rec.numbers.every(n => n && typeof n === 'object' && !Array.isArray(n) && typeof n.id === 'string' && n.id
     && Object.values(n).every(x => x == null || typeof x === 'string'))))
     return { why: `"${id}" (its other numbers aren't name, phone and when to call)` };
