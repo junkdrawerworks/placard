@@ -825,7 +825,8 @@ async function offerLastDone(s, day) {
     { name: 'day', label: s.task ? `Last ${job(s.task)}` : 'Last done', type: 'date', value: day,
       hint: isoDay(s.lastDone) ? `The page says ${dayText(s.lastDone)} now.` : 'The page has no Last done date yet.' }] });
   if (!v || !isoDay(v.day)) return;
-  if (save({ ...(sys(s.id) || s), lastDone: v.day })) { toast(`${s.name}: last done ${dayText(v.day)}.`); saidSaved(s.id); }
+  // its own toast only: saidSaved's "Saved." a moment later took its place before it could be read
+  if (save({ ...(sys(s.id) || s), lastDone: v.day })) toast(`${s.name}: last done ${dayText(v.day)}.`);
 }
 
 // A sticker whose page isn't in the manual (deleted, or never made): who to call, the report form and the front page
