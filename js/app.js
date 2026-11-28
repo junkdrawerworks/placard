@@ -182,8 +182,9 @@ function renderSystem(s) {
 // The report form. A report typed on one bar in a basement must not be lost: what's typed stays on the phone
 // (placard.draft, one per page, with the time it was typed) until a send works, and the form opens with it next time.
 // Send waits for the answer; if it fails the form stays open with the text, says so, and offers a text message to the
-// house contact instead. Once the form is closed, a line under the report button says it hasn't gone, with Send it now.
-// Nothing sends it by itself: a report Google got but answered late would go twice.
+// house contact instead. Once the form is closed, a line under the report button says it hasn't gone, with Send it now,
+// and Discard for one that isn't wanted after all (typed and closed, or phoned in instead). Nothing sends it by itself:
+// a report Google got but answered late would go twice.
 const DRAFTS = 'placard.draft';
 const draftOf = key => (jget(DRAFTS) || {})[key] || null;
 const keepDraft = (key, v) => {
@@ -228,12 +229,16 @@ function reportButton(s, label) {
   const key = s?.id || '', done = sent[key], kept = draftOf(key);
   const unsent = kept?.text ? h('div', { class: 'unsent' },
     h('p', { class: 'msg wait' }, `Not sent yet: "${excerpt(kept.text)}"${kept.at ? ` (${dayShort(kept.at)})` : ''}.`),
-    h('div', { class: 'btns' }, sending[key] ? h('button', { type: 'button', class: 'btn', disabled: true }, 'Sending…') : h('button', { type: 'button', class: 'btn', onclick: async e => {
+    h('div', { class: 'btns' }, sending[key] ? h('button', { type: 'button', class: 'btn', disabled: true }, 'Sending…') : [h('button', { type: 'button', class: 'btn', onclick: async e => {
       const b = e.currentTarget;
       b.disabled = true; b.textContent = 'Sending…';
       try { const done = await sendReport(s, kept); render(); sentToast(done); }
       catch (err) { b.disabled = false; b.textContent = 'Send it now'; toast(failLine(err), 'bad'); }
-    } }, 'Send it now'))) : null;
+    } }, 'Send it now'),
+    h('button', { type: 'button', class: 'btn ghost', onclick: async () => {
+      if (!await confirmSheet('Discard this report?', `"${excerpt(kept.text)}" goes from this phone, and the form opens empty.`, 'Discard', { danger: true })) return;
+      keepDraft(key, null); render(); toast('Discarded.');
+    } }, 'Discard')])) : null;
   return [
     h('div', { class: 'btns stack' }, h('button', { type: 'button', class: 'btn ghost wide', onclick: () => report(s) }, label)),
     unsent || (done ? h('p', { class: 'msg ok sent' }, done.repeat ? already(done) : done.emailed ? `Sent to the owner at ${clock(done.at)}.` : `Saved for the owner at ${clock(done.at)}. If it's urgent, call.`) : null),

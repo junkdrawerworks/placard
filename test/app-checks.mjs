@@ -272,6 +272,12 @@ export async function draftChecks({ browser, base, assert }) {
     await page.waitForSelector('.unsent');
     assert.equal(await text('.unsent .msg'), `Not sent yet: "No hot water since the power cut this…" (${day(was)}).`);
     assert.equal(await page.locator('.unsent').count(), 1, 'the line shows twice');
+    // Discard asks, and Cancel keeps it
+    await page.click('.unsent >> text=Discard');
+    await page.getByRole('dialog', { name: 'Discard this report?' }).waitFor();
+    assert.deepEqual(await page.locator('dialog[open] button[type=submit]').evaluate(b => [b.textContent, b.className]), ['Discard', 'btn danger']);
+    await page.click('dialog[open] >> text=Cancel');
+    assert.equal(await page.locator('.unsent').count(), 1, 'Cancel discarded the report');
     // Send it now: one report, and the line says it went
     await page.click('.unsent >> text=Send it now');
     await page.waitForSelector('.toast.show >> text=Sent. The owner gets it by email.');
@@ -300,6 +306,23 @@ export async function draftChecks({ browser, base, assert }) {
     L.delay = 0;
     assert.deepEqual(L.reports.map(r => r.text).filter(t => /relief valve/.test(t)), ['The relief valve drips into the pan'], 'the report went twice, or not at all');
     assert.match(await text('.sent'), /^Sent to the owner at \d{1,2}:\d\d [ap]m\.$/);
+    // typed, then closed without Send (changed their mind, or phoned instead): the line has Discard, which takes it off
+    // the phone and the form opens empty
+    await page.goto(base + '#');
+    await page.waitForSelector('.urgent-tile');
+    await page.click('text=Report a problem');
+    await page.fill('dialog[open] #f-text', 'The porch light flickers');
+    await page.click('dialog[open] >> text=Cancel');
+    await page.waitForSelector('.unsent');
+    await page.click('.unsent >> text=Discard');
+    await page.click('dialog[open] button[type=submit]');
+    await page.waitForSelector('.toast.show >> text=Discarded.');
+    assert.equal(await page.locator('.unsent').count(), 0);
+    assert.equal(await page.evaluate(() => JSON.stringify(JSON.parse(localStorage.getItem('placard.draft') || '{}')[''] || null)), 'null', 'the discarded report is still on the phone');
+    await page.click('text=Report a problem');
+    assert.equal(await page.inputValue('dialog[open] #f-text'), '', 'the discarded report came back in the form');
+    await page.click('dialog[open] >> text=Cancel');
+    assert.ok(!L.reports.some(r => /porch light flickers/.test(r.text)), 'a discarded report was sent');
     assert.deepEqual(errors, [], 'errors with a kept report');
   } finally { await ctx.close(); }
 }
