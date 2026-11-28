@@ -7,23 +7,34 @@ import { SAMPLE, STARTER } from '../js/starter.js';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const LEDGER = 'https://script.google.com/macros/s/AKfyTEST/exec';
 // A pretend Chrome NFC reader with one sticker held against the phone (__nfc.sticker: a blank one to start with). A scan
-// reads it at once; a write that mustn't write over anything is turned down by a sticker holding a link, and every
-// write by a locked one, as Chrome does; a lock locks it. __nfc.hold(url, locked) puts another sticker there.
+// reads it at once; a write that mustn't write over anything is turned down (NotAllowedError) by a sticker holding a
+// link, and every write on a locked one fails as Chrome's IO error (NetworkError); a lock locks it. As in Chrome, a
+// write turned down or failed lets go of the sticker (__nfc.held false): a scan reads nothing, and a write waits, until
+// __nfc.hold(url, locked, serial) brings a sticker near again. hold() is also how another sticker is put there.
 const fakeNfc = () => {
-  window.__nfc = { writes: [], locks: 0, sticker: { url: '', locked: false } };
-  window.__nfc.hold = (url = '', locked = false) => { window.__nfc.sticker = { url, locked }; };
+  window.__nfc = { writes: [], locks: 0, sticker: { url: '', locked: false, serial: '04:5e' }, held: true, scans: [], waiting: null };
+  window.__nfc.hold = (url = '', locked = false, serial = '04:5e') => {
+    const n = window.__nfc;
+    n.sticker = { url, locked, serial }; n.held = true;
+    for (const s of n.scans.splice(0)) if (!s.signal?.aborted) s.read();
+    const w = n.waiting; n.waiting = null; w?.();
+  };
   window.NDEFReader = class {
     async write(msg, { overwrite = true } = {}) {
-      const s = window.__nfc.sticker;
-      if (s.locked) throw new DOMException('', 'NotAllowedError');
-      if (!overwrite && s.url) throw new DOMException('NDEFWriteOptions#overwrite does not allow overwrite.', 'NotAllowedError');
-      window.__nfc.writes.push(msg.records[0].data);
+      const n = window.__nfc;
+      if (!n.held) await new Promise(res => { n.waiting = res; });
+      const s = n.sticker;
+      if (!overwrite && s.url) { n.held = false; throw new DOMException('NDEFWriteOptions#overwrite does not allow overwrite.', 'NotAllowedError'); }
+      if (s.locked) { n.held = false; throw new DOMException('Failed to write due to an IO error: null', 'NetworkError'); }
+      n.writes.push(msg.records[0].data);
       s.url = msg.records[0].data;
     }
     async makeReadOnly() { window.__nfc.locks++; window.__nfc.sticker.locked = true; }
     async scan({ signal } = {}) {
-      const { url } = window.__nfc.sticker;
-      setTimeout(() => { if (!signal?.aborted) this.onreading?.({ serialNumber: '04:5e', message: { records: url ? [{ recordType: 'url', data: new TextEncoder().encode(url) }] : [] } }); }, 20);
+      const n = window.__nfc;
+      const read = () => { const { url, serial } = n.sticker; this.onreading?.({ serialNumber: serial, message: { records: url ? [{ recordType: 'url', data: new TextEncoder().encode(url) }] : [] } }); };
+      if (n.held) setTimeout(() => { if (!signal?.aborted) read(); }, 20);
+      else n.scans.push({ signal, read });
     }
   };
 };
@@ -821,6 +832,18 @@ export async function ownerChecks({ browser, base, assert }) {
     await page.waitForFunction(() => /not locked yet\.$/.test(document.querySelector('.nfc .state')?.textContent));
     assert.equal(await said(), 'Written. Tap it with the phone to check, then lock it.');
     assert.equal(await page.locator('.nfc .msg.sample').count(), 0, 'the sample\'s lines on the owner\'s own manual');
+    // Write again on the sticker still against the phone: it holds a link, so Chrome turns the write down and lets go of
+    // it. The panel asks for it to be taken off and held there again, and reads it only then: this page's link already
+    await page.click('text=Write sticker');
+    await page.waitForFunction(() => /^This sticker already holds/.test(document.querySelector('.nfc > .msg:last-child')?.textContent));
+    assert.equal(await said(), 'This sticker already holds something. Take it off the phone, then hold it there again.');
+    await page.waitForTimeout(300);
+    assert.deepEqual([await said(), await page.locator('.nfc button', { hasText: 'Stop' }).count(), await page.evaluate(() => window.__nfc.writes.length)],
+      ['This sticker already holds something. Take it off the phone, then hold it there again.', 1, 1], 'the panel went on without the sticker held there again');
+    await page.evaluate(() => window.__nfc.hold('https://tag.junkdrawer.works/h/water-heater'));
+    await page.waitForFunction(() => document.querySelector('.nfc > .msg:last-child')?.textContent === 'Already holds this link.');
+    assert.equal(await page.evaluate(() => window.__nfc.writes.length), 1, 'written over its own link');
+    assert.match(await state(), /not locked yet\.$/);
     // Lock reads the sticker first: another page's sticker, or a blank one, isn't locked, and the panel says why
     for (const [held, line] of [['https://tag.junkdrawer.works/h/smoke-co', 'This sticker opens Smoke and CO alarms, not Water heater. Nothing was locked.'],
       ['https://tag.junkdrawer.works/h/house', 'This sticker opens the front page, not Water heater. Nothing was locked.'],
