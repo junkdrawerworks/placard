@@ -891,6 +891,12 @@ async function reportsChecks(page, base, assert) {
   assert.ok(await page.locator('.report.dim').evaluate(el => Number(getComputedStyle(el).opacity)) < 1, 'a handled report isn\'t greyed out');
   assert.equal(await page.locator('.report.dim button').count(), 0, 'Mark handled offered for a card already handled');
   assert.deepEqual((await cards())[1].links, [['Call', 'tel:5550101'], ['Text', 'sms:5550101']], 'a handled report lost its Call and Text');
+  // the same words later that morning, after they were marked handled: a new problem, so a card of its own, not "Sent 4 times"
+  await page.evaluate(([r1, at]) => { const { ledger, render } = window.__placard;
+    ledger.put('reports', { ...r1, id: 'r5', at: new Date(at + 40 * 60000).toISOString(), status: 'new' }); render(); }, [r1, at]);
+  await page.waitForFunction(() => document.querySelectorAll('.report').length === 3);
+  assert.deepEqual((await cards()).map(c => [c.text, c.times, c.handled]), [['Which day is trash?', '', false], ['Small drip from the valve on the side.', '', false],
+    ['Small drip from the valve on the side.', `Sent 3 times, ${span}`, true]], 'a report after the first was handled joined its card');
 }
 
 // On Letter with 0.4 in margins the page is 739 px across: the printed thing fits inside it, nothing else prints, and a

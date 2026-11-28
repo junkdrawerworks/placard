@@ -531,7 +531,7 @@ function renderPrint() {
 // Call and Text, an email address Email.
 function renderReports() {
   const cards = groupReports(ledger.docs('reports'));
-  const handle = c => { for (const r of c.reports) if (r.status !== 'handled') ledger.put('reports', { ...r, status: 'handled', handled: today() }); render(); };
+  const handle = c => { const at = Date.now(); for (const r of c.reports) if (r.status !== 'handled') ledger.put('reports', { ...r, status: 'handled', handled: today(), handledAt: at }); render(); };
   return [
     h('p', { class: 'crumb' }, h('a', { href: '#/owner' }, '‹ Edit')), h('h2', {}, 'Reports'),
     cards.length ? h('ul', { class: 'list' }, cards.map(c => {

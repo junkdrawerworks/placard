@@ -124,6 +124,19 @@ test('Reports: a phone number or an email in a report\'s contact, and one card f
     r('d', 'No hot water', at(28, 9, 0)), r('e', 'No hot water', at(27, 3, 0), { system: 'well-tank' }), r('f', 'Drip', at(27, 4, 0)), r('g', 'Odd', 'not a time')]);
   assert.deepEqual(cards.map(c => [c.reports.map(x => x.id).join(''), c.handled]), [['d', false], ['f', false], ['e', false], ['abc', false], ['g', false]]);
   assert.equal(groupReports([r('a', 'x', at(27, 1, 0), { status: 'handled' }), r('b', 'x', at(27, 1, 5), { status: 'handled' })])[0].handled, true);
+  // the same words after the first was marked handled: a new problem, a card of its own (the ledger emailed it as new)
+  assert.deepEqual(groupReports([r('a', 'No hot water', at(27, 7, 0), { status: 'handled' }), r('b', 'No hot water', at(27, 18, 0))]).map(c => [c.reports.map(x => x.id).join(''), c.handled]),
+    [['b', false], ['a', true]], 'a report after the first was handled joined its card');
+  // handled in one press, a card stays one; the new one handled later stays its own
+  const press = (at, ...reps) => reps.map(x => ({ ...x, status: 'handled', handledAt: at }));
+  assert.deepEqual(groupReports([...press(1, r('a', 'No hot water', at(27, 7, 0)), r('b', 'No hot water', at(27, 7, 5), { repeat: true })), ...press(2, r('c', 'No hot water', at(27, 18, 0)))])
+    .map(c => [c.reports.map(x => x.id).join(''), c.handled]), [['c', true], ['ab', true]], 'two problems handled in turn read as one sent again');
+  // and one sent again after that joins the new card, not the handled one
+  assert.deepEqual(groupReports([r('a', 'No hot water', at(27, 7, 0), { status: 'handled' }), r('b', 'No hot water', at(27, 18, 0)), r('c', 'No hot water', at(27, 18, 5), { repeat: true })])
+    .map(c => c.reports.map(x => x.id).join('')), ['bc', 'a']);
+  // a repeat the ledger kept just after midnight joins the card it repeats
+  assert.deepEqual(groupReports([r('a', 'No heat', at(27, 23, 50)), r('b', 'No heat', at(28, 0, 10), { repeat: true }), r('c', 'No heat', at(28, 9, 0))]).map(c => c.reports.map(x => x.id).join('')),
+    ['c', 'ab'], 'a repeat after midnight started a card of its own');
   const t = (h, m) => new Date(2026, 10, 27, h, m).getTime();
   assert.deepEqual([timeSpan(t(2, 19), t(2, 31)), timeSpan(t(11, 58), t(12, 10)), timeSpan(t(9, 0), t(9, 0)), timeSpan(t(12, 5), t(13, 0))],
     ['2:19-2:31 am', '11:58 am-12:10 pm', '9:00 am', '12:05-1:00 pm']);

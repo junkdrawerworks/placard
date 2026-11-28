@@ -77,19 +77,24 @@ export function reachBy(contact) {
 
 // Reports as the screen's cards: the same words from the same page on the same day (Send pressed again, or a repeat the
 // ledger kept without emailing) are one card, its reports oldest first; the cards newest first (one with no time last).
-// A card is handled when every report in it is.
+// A card is handled when every report in it is. The same words after a card was marked handled are a new problem (the ledger
+// emailed them as new): a card of their own, which any more join, and which stays its own once handled (the Mark handled
+// button gives every report in a card the same handledAt). A repeat the ledger kept just after midnight joins the card it
+// repeats.
 const words = t => String(t || '').replace(/\s+/g, ' ').trim().toLowerCase();
 const dayOf = ms => { const d = new Date(ms); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; };
 const when = r => { const t = Date.parse(r.at); return Number.isFinite(t) ? t : -Infinity; };   // no time: last
 export function groupReports(reports) {
-  const cards = new Map();
+  const cards = [], open = new Map();   // page and words -> the card a new report of them joins
   for (const r of [...reports].sort((a, b) => when(a) - when(b))) {
     const at = Date.parse(r.at);
-    const key = Number.isFinite(at) ? [r.system || '', words(r.text), dayOf(at)].join('\n') : 'id:' + r.id;
-    if (!cards.has(key)) cards.set(key, []);
-    cards.get(key).push(r);
+    if (!Number.isFinite(at)) { cards.push([r]); continue; }
+    const key = [r.system || '', words(r.text)].join('\n'), card = open.get(key);
+    const last = card?.at(-1), together = last && (last.status !== 'handled' || (r.status === 'handled' && r.handledAt === last.handledAt));
+    if (together && (r.repeat || dayOf(Date.parse(card[0].at)) === dayOf(at))) card.push(r);
+    else { cards.push([r]); open.set(key, cards.at(-1)); }
   }
-  return [...cards.values()].map(reps => ({ reports: reps, first: reps[0], last: reps.at(-1), handled: reps.every(r => r.status === 'handled') }))
+  return cards.map(reps => ({ reports: reps, first: reps[0], last: reps.at(-1), handled: reps.every(r => r.status === 'handled') }))
     .sort((a, b) => when(b.last) - when(a.last));
 }
 // '2:19 am', and a span of times in a day: '2:19-2:31 am', '11:58 am-12:10 pm'.
