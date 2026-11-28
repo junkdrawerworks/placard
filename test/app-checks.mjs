@@ -382,7 +382,7 @@ export async function ownerChecks({ browser, base, assert }) {
     await page.waitForFunction(() => window.__nfc.locks === 1);
     // locked: no Write or Lock to press by mistake, and where a change of address is made instead
     await page.waitForFunction(() => /^Locked /.test(document.querySelector('.nfc .state')?.textContent));
-    assert.match(await state(), /^Locked [A-Z][a-z]{2} \d{1,2}, \d{4}\. To send it somewhere else, use Switchboard\.$/);
+    assert.match(await state(), /^Locked [A-Z][a-z]{2} \d{1,2}, \d{4}\. To send it somewhere else, add it to OVERRIDES in Switchboard's 404\.html\.$/);
     assert.equal(await page.locator('.nfc button', { hasText: /Write sticker|Lock sticker/ }).count(), 0, 'Write and Lock offered for a locked sticker');
     assert.equal(await said(), 'Locked. It will open this page for good.');
     await page.waitForFunction(() => /^(Saved|Up to date)$/.test(document.querySelector('.sync')?.textContent));
