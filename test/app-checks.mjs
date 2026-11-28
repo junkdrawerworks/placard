@@ -438,7 +438,10 @@ export async function photoChecks({ browser, base, assert }) {
     await page.waitForFunction(() => navigator.serviceWorker?.controller, null, { timeout: 15000 });
     await page.reload();   // a second visit, run by the worker: the read asks for the photos it hasn't kept
     await page.waitForSelector('.urgent-tile');
-    await page.waitForFunction(async () => !!(await caches.match('photos/sample-shutoff.jpg')), null, { timeout: 15000, polling: 250 });
+    // (a poll: waitForFunction doesn't wait for an async test, whose promise counts as true at once)
+    const kept = () => page.evaluate(async () => !!(await caches.match('photos/sample-shutoff.jpg')));
+    for (let i = 0; i < 60 && !(await kept()); i++) await page.waitForTimeout(250);
+    assert.ok(await kept(), 'after a visit to the front page the photo was not kept for no signal');
     assert.equal(await page.locator('figure.photo').count(), 0, 'the front page showed a photo');
     await off.setOffline(true);
     await off.unroute(base + 'js/config.js');
