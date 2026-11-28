@@ -739,7 +739,9 @@ function renderPrint() {
       h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn', onclick: () => print() }, 'Print'))),
     h('div', { class: 'qr-sheet' },
       qrCard('house', 'House manual', 'Tap or scan for the whole manual.', title === 'House manual' ? '' : title),
-      systems().map(s => qrCard(s.id, s.name, 'Tap a phone on the sticker, or scan, for what to do.', title, s))),
+      // the emergency cards first, as Print the manual has them: each is two rows tall in print, and one that would
+      // start in a sheet's last row is pushed to the next sheet with its row, leaving the sheet a quarter empty
+      [...systems().filter(s => s.emergency), ...systems().filter(s => !s.emergency)].map(s => qrCard(s.id, s.name, 'Tap a phone on the sticker, or scan, for what to do.', title, s))),
   ];
 }
 // An emergency page's card carries its first steps under the code, for a tenant in a basement with no signal whose

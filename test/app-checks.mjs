@@ -1552,16 +1552,19 @@ async function cardStepsChecks(page, base, assert) {
   const sample = Object.fromEntries(SAMPLE['placard.site'].map(d => [d.id, d]));
   const steps = id => sample[id].steps.split('\n');
   const call = 'Call Riverbend Property Care, 555-0142', none = { fire: '', steps: [], more: '', call: '' };
+  // the emergency cards (two rows tall in print) first after the front page's, as Print the manual has them, so none is
+  // pushed to the next sheet with its row
   assert.deepEqual(await cards(), [
     { name: 'House manual', ...none }, { name: 'Main water shutoff', fire: '', steps: steps('water-shutoff'), more: '', call },
-    { name: 'Water heater', ...none }, { name: 'Main electrical panel', fire: '', steps: steps('panel-main'), more: '', call },
+    { name: 'Main electrical panel', fire: '', steps: steps('panel-main'), more: '', call }, { name: 'Water heater', ...none },
     { name: 'Air handler, upstairs', ...none }, { name: 'Garage door opener', ...none }],
-    'the cards\' steps (the sample\'s alarm page was deleted above, and the garage door imported)');
+    'the cards\' steps and order (the sample\'s alarm page was deleted above, and the garage door imported)');
   // the alarm page back, with more steps than a card holds, and long ones
   await page.evaluate(s => { const { ledger, render } = window.__placard; ledger.put('site', { ...s, steps: [s.steps, 'Test every alarm once a month with its button: hold it until it sounds, then let go.',
     'A CO alarm that sounds and stays on: open the windows, get everyone out and call 911 from outside; do not go back in until the fire department says so.',
     'Never take the battery out to stop a chirp. Tell us and we will replace it the same day.'].join('\n') }); render(); }, sample['smoke-co']);
   await page.waitForFunction(() => [...document.querySelectorAll('.qr-card b')].some(b => b.textContent === 'Smoke and CO alarms'));
+  assert.deepEqual((await cards()).map(c => c.name).slice(0, 4), ['House manual', 'Main water shutoff', 'Main electrical panel', 'Smoke and CO alarms']);
   const alarm = (await cards()).find(c => c.name === 'Smoke and CO alarms');
   assert.deepEqual(alarm, { name: 'Smoke and CO alarms', fire: 'Fire, smoke or a CO alarm: get everyone out, then call 911.', steps: [...steps('smoke-co'),
     'Test every alarm once a month with its button: hold it until it sounds, then let go.', 'A CO alarm that sounds and stays on: open the windows, get everyone out and call 911 from outside; do not go back in until the fire department says so.'],
