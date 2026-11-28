@@ -5,7 +5,7 @@ import { Ledger, watchConnectLinks, publicRead, publicReport, refusal, importSum
 import { tagUrl } from './kit/tags.js';
 import { nfcPanel } from './kit/panel.js';
 import { LEDGER_URL } from './config.js';
-import { KINDS, STARTER, SAMPLE, parseFacts, factsText, lines, mergeImport, dial, splitLinks } from './starter.js';
+import { KINDS, STARTER, SAMPLE, parseFacts, factsText, lines, mergeImport, dial, splitLinks, reachBy, groupReports, clock, timeSpan } from './starter.js';
 
 const params = new URLSearchParams(location.search);
 const demo = params.has('demo');
@@ -223,7 +223,6 @@ const dayShort = at => {
 // When a report from each page went in this tab, for the line under its button.
 let sent = {};
 try { sent = JSON.parse(sessionStorage.getItem('placard.sent') || '{}'); } catch {}
-const clock = ms => { const d = new Date(ms); return `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${d.getHours() < 12 ? 'am' : 'pm'}`; };
 
 function reportButton(s, label) {
   const key = s?.id || '', done = sent[key], kept = draftOf(key);
@@ -466,7 +465,7 @@ function importFacts() {
 
 function renderOwner() {
   const list = systems();
-  const reports = ledger.docs('reports').filter(r => r.status !== 'handled'), wait = ledger.notReady('site');
+  const reports = groupReports(ledger.docs('reports')).filter(c => !c.handled), wait = ledger.notReady('site');
   return [
     h('p', { class: 'crumb' }, h('a', { href: '#' }, '‹ Front page')),
     h('h2', {}, 'Edit the manual'),
@@ -520,16 +519,29 @@ function renderPrint() {
   ];
 }
 
+// One card for the same words from the same page on one day (groupReports): sent again, or kept by the ledger as a
+// repeat, it says how many times and when, and one Mark handled does them all. A phone number left in a report gets
+// Call and Text, an email address Email.
 function renderReports() {
-  const reps = ledger.docs('reports').sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  const cards = groupReports(ledger.docs('reports'));
+  const handle = c => { for (const r of c.reports) if (r.status !== 'handled') ledger.put('reports', { ...r, status: 'handled', handled: today() }); render(); };
   return [
     h('p', { class: 'crumb' }, h('a', { href: '#/owner' }, '‹ Edit')), h('h2', {}, 'Reports'),
-    reps.length ? h('ul', { class: 'list' }, reps.map(r => h('li', { class: 'card report' + (r.status === 'handled' ? ' dim' : '') },
-      h('p', {}, h('span', { class: 'chip ' + (r.status === 'handled' ? '' : 'warn') }, r.kind || 'Note'), ' ', h('b', {}, r.systemName || 'General'), ' ', h('small', {}, r.at ? stampText(Date.parse(r.at)) : '')),
-      h('p', {}, r.text),
-      h('p', { class: 'muted' }, [r.name, r.contact].filter(Boolean).join(' · ') || 'No name left'),
-      r.status !== 'handled' ? h('button', { type: 'button', class: 'btn ghost', onclick: () => { ledger.put('reports', { ...r, status: 'handled', handled: today() }); render(); } }, 'Mark handled') : null)))
-      : h('p', { class: 'empty' }, 'No reports yet.'),
+    cards.length ? h('ul', { class: 'list' }, cards.map(c => {
+      const r = c.first, n = c.reports.length, at = Date.parse(r.at);
+      const who = [...new Set(c.reports.map(x => [x.name, x.contact].filter(Boolean).join(' · ')).filter(Boolean))];
+      const reach = [...new Map(c.reports.map(x => reachBy(x.contact)).filter(x => x.tel || x.email).map(x => [x.tel + ' ' + x.email, x])).values()];
+      return h('li', { class: 'card report' + (c.handled ? ' dim' : '') },
+        h('p', {}, h('span', { class: 'chip ' + (c.handled ? '' : 'warn') }, r.kind || 'Note'), ' ', h('b', {}, r.systemName || 'General'), ' ',
+          h('small', {}, !Number.isFinite(at) ? '' : n > 1 ? dayShort(at) : stampText(at))),
+        h('p', {}, r.text),
+        n > 1 ? h('p', { class: 'muted times' }, `Sent ${n} times, ${timeSpan(at, Date.parse(c.last.at))}`) : null,
+        h('p', { class: 'muted' }, who.join('; ') || 'No name left'),
+        reach.length || !c.handled ? h('div', { class: 'btns' },
+          reach.map(x => [x.tel ? h('a', { class: 'btn ghost', href: 'tel:' + x.tel }, 'Call') : null, x.tel ? h('a', { class: 'btn ghost', href: 'sms:' + x.tel }, 'Text') : null,
+            x.email ? h('a', { class: 'btn ghost', href: 'mailto:' + x.email }, 'Email') : null]),
+          !c.handled ? h('button', { type: 'button', class: 'btn ghost', onclick: () => handle(c) }, 'Mark handled') : null) : null);
+    })) : h('p', { class: 'empty' }, 'No reports yet.'),
   ];
 }
 

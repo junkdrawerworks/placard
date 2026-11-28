@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseFacts, factsText, lines, STARTER, SAMPLE, checkPage, mergeFacts, mergeImport, dial, splitLinks } from '../js/starter.js';
+import { parseFacts, factsText, lines, STARTER, SAMPLE, checkPage, mergeFacts, mergeImport, dial, splitLinks, reachBy, groupReports, timeSpan } from '../js/starter.js';
 
 test('details lines round-trip', () => {
   const f = parseFacts('Model: XE50T10\n\nFilter: 16 × 25 × 1\nno colon here\nTime: 3:30');
@@ -111,4 +111,20 @@ test('index.html asks for every module app.js imports at once, and says it is lo
   }
   assert.deepEqual(preloaded, [...seen].sort(), 'the modulepreload list in index.html isn\'t what app.js imports');
   assert.match(page, /<div id="app"[^>]*><p class="empty">Loading the house manual…<\/p><\/div>/, 'a first tap shows a blank page until the scripts have come');
+});
+
+test('Reports: a phone number or an email in a report\'s contact, and one card for the same words from one page on one day', () => {
+  for (const [contact, tel, email] of [['555-0101', '5550101', ''], ['5550101', '5550101', ''], ['+1 845 555 0101', '+18455550101', ''], ['(845) 555-0101', '8455550101', ''],
+    ['Pat, 555-0101 after 6 pm', '5550101', ''], ['pat@example.com', '', 'pat@example.com'], ['555-0101 or pat@example.com', '5550101', 'pat@example.com'],
+    ['call me', '', ''], ['12 Elm St', '', ''], ['', '', '']])
+    assert.deepEqual(reachBy(contact), { tel, email }, contact);
+  const at = (d, h, m) => new Date(2026, 10, d, h, m).toISOString();
+  const r = (id, text, when, more = {}) => ({ id, system: 'water-heater', text, at: when, status: 'new', ...more });
+  const cards = groupReports([r('a', 'No hot water', at(27, 2, 19)), r('b', '  no hot WATER ', at(27, 2, 25), { repeat: true }), r('c', 'No hot water', at(27, 2, 31), { status: 'handled' }),
+    r('d', 'No hot water', at(28, 9, 0)), r('e', 'No hot water', at(27, 3, 0), { system: 'well-tank' }), r('f', 'Drip', at(27, 4, 0)), r('g', 'Odd', 'not a time')]);
+  assert.deepEqual(cards.map(c => [c.reports.map(x => x.id).join(''), c.handled]), [['d', false], ['f', false], ['e', false], ['abc', false], ['g', false]]);
+  assert.equal(groupReports([r('a', 'x', at(27, 1, 0), { status: 'handled' }), r('b', 'x', at(27, 1, 5), { status: 'handled' })])[0].handled, true);
+  const t = (h, m) => new Date(2026, 10, 27, h, m).getTime();
+  assert.deepEqual([timeSpan(t(2, 19), t(2, 31)), timeSpan(t(11, 58), t(12, 10)), timeSpan(t(9, 0), t(9, 0)), timeSpan(t(12, 5), t(13, 0))],
+    ['2:19-2:31 am', '11:58 am-12:10 pm', '9:00 am', '12:05-1:00 pm']);
 });

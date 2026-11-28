@@ -64,6 +64,42 @@ export function splitLinks(text) {
   return out;
 }
 
+// ---- the Reports screen
+// How to answer a report: a phone number in its contact (Call and Text dial it, as the contact card's do) and an email
+// address. A contact that's only a number however it's typed ("5550101", "+1 845 555 0101") counts as a phone too.
+const EMAIL = /[^\s@<>(),;:"']+@[^\s@<>(),;:"']+\.[a-z]{2,}/i;
+export function reachBy(contact) {
+  const s = String(contact || '').trim(), email = (EMAIL.exec(s) || [''])[0];
+  const marked = splitLinks(email ? s.replace(email, ' ') : s).find(p => p.href?.startsWith('tel:'));
+  const bare = /^[+\d\s().-]+$/.test(s) && (s.match(/\d/g) || []).length >= 7 ? dial(s) : '';
+  return { tel: marked ? marked.href.slice(4) : bare, email };
+}
+
+// Reports as the screen's cards: the same words from the same page on the same day (Send pressed again, or a repeat the
+// ledger kept without emailing) are one card, its reports oldest first; the cards newest first (one with no time last).
+// A card is handled when every report in it is.
+const words = t => String(t || '').replace(/\s+/g, ' ').trim().toLowerCase();
+const dayOf = ms => { const d = new Date(ms); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; };
+const when = r => { const t = Date.parse(r.at); return Number.isFinite(t) ? t : -Infinity; };   // no time: last
+export function groupReports(reports) {
+  const cards = new Map();
+  for (const r of [...reports].sort((a, b) => when(a) - when(b))) {
+    const at = Date.parse(r.at);
+    const key = Number.isFinite(at) ? [r.system || '', words(r.text), dayOf(at)].join('\n') : 'id:' + r.id;
+    if (!cards.has(key)) cards.set(key, []);
+    cards.get(key).push(r);
+  }
+  return [...cards.values()].map(reps => ({ reports: reps, first: reps[0], last: reps.at(-1), handled: reps.every(r => r.status === 'handled') }))
+    .sort((a, b) => when(b.last) - when(a.last));
+}
+// '2:19 am', and a span of times in a day: '2:19-2:31 am', '11:58 am-12:10 pm'.
+export const clock = ms => { const d = new Date(ms); return `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${d.getHours() < 12 ? 'am' : 'pm'}`; };
+export function timeSpan(a, b) {
+  const [x, y] = [clock(a), clock(b)];
+  if (x === y) return x;
+  return x.slice(-2) === y.slice(-2) ? `${x.slice(0, -3)}-${y}` : `${x}-${y}`;
+}
+
 export const SAMPLE = {
   'placard.site': [
     { id: 'house', title: 'House manual', intro: 'Tap any sticker in the house for what that thing is and what to do about it. In an emergency, start here.',

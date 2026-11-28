@@ -824,10 +824,42 @@ export async function appChecks({ page, ctx, base, assert, problems }) {
   assert.equal(await page.locator('.qr-card').first().locator('span').textContent(), 'Tap or scan for the whole manual.');
   assert.equal(await page.locator('.qr-card .qr').first().getAttribute('data-url'), 'https://tag.junkdrawer.works/h/house');
   await printChecks(page, assert, '.qr-card');
-  await page.goto(base + '?demo#/reports');
-  await page.click('text=Mark handled');
+  await reportsChecks(page, base, assert);
+}
+
+// The Reports screen: the same words from the same page on one day are one card that says how many times and when,
+// with one Mark handled for all of them; a phone number left in a report gets Call and Text, an email address Email.
+async function reportsChecks(page, base, assert) {
+  await page.goto(base + '?demo#/owner');
+  await page.waitForSelector('.row');
+  assert.equal(await page.locator('#app a', { hasText: /^Reports/ }).textContent(), 'Reports (1)');
+  // the sample's report sent twice more within twelve minutes (the ledger keeps the repeats), and a question by email
+  const r1 = (await import('../js/starter.js')).SAMPLE['placard.reports'][0], at = Date.parse(r1.at);
+  await page.evaluate(([r1, at]) => {
+    const { ledger, render } = window.__placard;
+    ledger.put('reports', { ...r1, id: 'r2', text: '  small drip from the valve   on the side.', at: new Date(at + 6 * 60000).toISOString(), repeat: true });
+    ledger.put('reports', { ...r1, id: 'r3', at: new Date(at + 12 * 60000).toISOString(), repeat: true });
+    ledger.put('reports', { id: 'r4', system: '', systemName: '', kind: 'Question', name: 'Pat', contact: 'pat@example.com', text: 'Which day is trash?', at: new Date(at + 3600e3).toISOString(), status: 'new' });
+    render();
+  }, [r1, at]);
+  assert.equal(await page.locator('#app a', { hasText: /^Reports/ }).textContent(), 'Reports (2)', 'a report sent three times counts three');
+  await page.evaluate(() => { location.hash = '#/reports'; });   // the same page: the sample keeps the reports added
+  await page.waitForSelector('.report');
+  const cards = () => page.locator('.report').evaluateAll(ls => ls.map(l => ({ text: l.querySelector('p:nth-child(2)').textContent, times: l.querySelector('.times')?.textContent || '',
+    links: [...l.querySelectorAll('.btns a')].map(a => [a.textContent, a.getAttribute('href')]), handled: l.classList.contains('dim') })));
+  const span = await page.evaluate(at => { const c = ms => { const d = new Date(ms); return [d.getHours() % 12 || 12, String(d.getMinutes()).padStart(2, '0'), d.getHours() < 12 ? 'am' : 'pm']; };
+    const [a, b] = [c(at), c(at + 12 * 60000)]; return a[2] === b[2] ? `${a[0]}:${a[1]}-${b[0]}:${b[1]} ${b[2]}` : `${a.join(':').replace(/:(am|pm)$/, ' $1')}-${b.join(':').replace(/:(am|pm)$/, ' $1')}`; }, at);
+  assert.deepEqual(await cards(), [
+    { text: 'Which day is trash?', times: '', links: [['Email', 'mailto:pat@example.com']], handled: false },
+    { text: 'Small drip from the valve on the side.', times: `Sent 3 times, ${span}`, links: [['Call', 'tel:5550101'], ['Text', 'sms:5550101']], handled: false }],
+    'the Reports screen\'s cards');
+  // one Mark handled for the three
+  await page.locator('.report', { hasText: 'Small drip' }).locator('button', { hasText: 'Mark handled' }).click();
   await page.waitForSelector('.report.dim');
+  assert.deepEqual(await page.evaluate(() => ['r1', 'r2', 'r3', 'r4'].map(id => window.__placard.ledger.doc('reports', id).status)), ['handled', 'handled', 'handled', 'new']);
   assert.ok(await page.locator('.report.dim').evaluate(el => Number(getComputedStyle(el).opacity)) < 1, 'a handled report isn\'t greyed out');
+  assert.equal(await page.locator('.report.dim button').count(), 0, 'Mark handled offered for a card already handled');
+  assert.deepEqual((await cards())[1].links, [['Call', 'tel:5550101'], ['Text', 'sms:5550101']], 'a handled report lost its Call and Text');
 }
 
 // On Letter with 0.4 in margins the page is 739 px across: the printed thing fits inside it, nothing else prints, and a
