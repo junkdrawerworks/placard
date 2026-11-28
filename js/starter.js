@@ -110,7 +110,7 @@ export function doneText(p) {
 
 // ---- the Reports screen
 // How to answer a report: a phone number in its contact (Call and Text dial it, as the contact card's do) and an email
-// address. A contact that's only a number however it's typed ("5550101", "+1 845 555 0101") counts as a phone too.
+// address. A contact that's only a number however it's typed ("5550101", "+1 800 555 0101") counts as a phone too.
 const EMAIL = /[^\s@<>(),;:"']+@[^\s@<>(),;:"']+\.[a-z]{2,}/i;
 export function reachBy(contact) {
   const s = String(contact || '').trim(), email = (EMAIL.exec(s) || [''])[0];

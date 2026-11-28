@@ -279,15 +279,15 @@ export async function numbersChecks({ browser, base, assert }) {
     assert.match(await page.locator('section.numbers p.muted').textContent(), /^The septic company, the power company's outage line/);
     // added: a phone number is needed
     await page.click('text=Add a number');
-    await page.fill('#f-name', 'Hudson Septic');
+    await page.fill('#f-name', 'Acme Septic');
     await page.click('dialog[open] button[type=submit]');
     await page.waitForSelector('dialog[open] .sheet-msg >> text=Put in a phone number to call.');
-    await page.fill('#f-phone', '845-555-0170');
+    await page.fill('#f-phone', '800-555-0170');
     await page.fill('#f-note', 'The septic alarm sounds, or a drain backs up.');
     await page.click('dialog[open] button[type=submit]');
     await page.waitForSelector('section.numbers .row');
     await settled();
-    assert.deepEqual(L.puts.at(-1).numbers, [{ id: 'hudson-septic', name: 'Hudson Septic', phone: '845-555-0170', note: 'The septic alarm sounds, or a drain backs up.' }]);
+    assert.deepEqual(L.puts.at(-1).numbers, [{ id: 'acme-septic', name: 'Acme Septic', phone: '800-555-0170', note: 'The septic alarm sounds, or a drain backs up.' }]);
     assert.equal(L.puts.at(-1).contact.phone, '555-0142', 'the house contact changed');
     await page.click('text=Add a number');
     await page.fill('#f-name', 'Backup: Lee');
@@ -297,43 +297,43 @@ export async function numbersChecks({ browser, base, assert }) {
     // a page picks one for its card
     await page.goto(base + '#water-heater');
     await page.click('text=Edit this page');
-    assert.deepEqual(await page.locator('#f-call option').allTextContents(), ['Who to call (Riverbend Property Care)', 'Hudson Septic', 'Backup: Lee']);
+    assert.deepEqual(await page.locator('#f-call option').allTextContents(), ['Who to call (Riverbend Property Care)', 'Acme Septic', 'Backup: Lee']);
     assert.equal(await page.inputValue('#f-call'), '');
-    await page.selectOption('#f-call', 'hudson-septic');
+    await page.selectOption('#f-call', 'acme-septic');
     await page.click('dialog[open] button[type=submit]');
-    await page.waitForFunction(() => document.querySelector('.contact .who')?.textContent === 'Hudson Septic');
-    assert.deepEqual(await card(page), { who: ['Hudson Septic', 'Or Riverbend Property Care'], heads: [],
-      links: [['Call 845-555-0170', 'tel:8455550170', 'btn'], ['Call 555-0142', 'tel:5550142', 'btn ghost'], ['Text', 'sms:5550142', 'btn ghost'], ['Email', 'mailto:help@example.com', 'btn ghost']] });
+    await page.waitForFunction(() => document.querySelector('.contact .who')?.textContent === 'Acme Septic');
+    assert.deepEqual(await card(page), { who: ['Acme Septic', 'Or Riverbend Property Care'], heads: [],
+      links: [['Call 800-555-0170', 'tel:8005550170', 'btn'], ['Call 555-0142', 'tel:5550142', 'btn ghost'], ['Text', 'sms:5550142', 'btn ghost'], ['Email', 'mailto:help@example.com', 'btn ghost']] });
     // the report form's urgent line stays the house contact's
     await page.click('text=Report a problem or log a visit');
     assert.equal(await page.locator('dialog[open] .call-now').textContent(), 'Urgent? Call 555-0142 now.');
     await page.click('dialog[open] >> text=Cancel');
     await page.goto(base + '#/owner');
     await page.waitForSelector('section.numbers .row');
-    assert.deepEqual(await page.locator('section.numbers .row .s').allTextContents(), ['845-555-0170 · on Water heater\'s card', '555-0177']);
+    assert.deepEqual(await page.locator('section.numbers .row .s').allTextContents(), ['800-555-0170 · on Water heater\'s card', '555-0177']);
     // the front page: the house contact, then the other numbers, each with when to call and Call
     await page.goto(base + '#');
     await page.waitForSelector('.contact h3');
-    assert.deepEqual(await card(page), { who: ['Riverbend Property Care', 'Hudson Septic', 'Backup: Lee'], heads: ['Other numbers'],
+    assert.deepEqual(await card(page), { who: ['Riverbend Property Care', 'Acme Septic', 'Backup: Lee'], heads: ['Other numbers'],
       links: [['Call 555-0142', 'tel:5550142', 'btn'], ['Text', 'sms:5550142', 'btn ghost'], ['Email', 'mailto:help@example.com', 'btn ghost'],
-        ['Call 845-555-0170', 'tel:8455550170', 'btn ghost'], ['Call 555-0177', 'tel:5550177', 'btn ghost']] });
+        ['Call 800-555-0170', 'tel:8005550170', 'btn ghost'], ['Call 555-0177', 'tel:5550177', 'btn ghost']] });
     // a tenant sees the same
     await settled();
     const tenant = await phone(browser, base);
     tenant.L.site = L.site;
     await tenant.page.goto(base + '#water-heater');
     await tenant.page.waitForSelector('.contact .who');
-    assert.deepEqual((await card(tenant.page)).who, ['Hudson Septic', 'Or Riverbend Property Care']);
+    assert.deepEqual((await card(tenant.page)).who, ['Acme Septic', 'Or Riverbend Property Care']);
     await tenant.page.goto(base);
     await tenant.page.waitForSelector('.contact h3');
-    assert.deepEqual((await card(tenant.page)).who, ['Riverbend Property Care', 'Hudson Septic', 'Backup: Lee']);
+    assert.deepEqual((await card(tenant.page)).who, ['Riverbend Property Care', 'Acme Septic', 'Backup: Lee']);
     assert.deepEqual(tenant.errors, []);
     await tenant.ctx.close();
     // deleted: asked first, naming the page whose card goes back to the house contact
     await page.goto(base + '#/owner');
-    await page.click('section.numbers .row >> text=Hudson Septic');
+    await page.click('section.numbers .row >> text=Acme Septic');
     await page.click('dialog[open] button.danger');
-    const ask = page.getByRole('dialog', { name: 'Delete Hudson Septic?' });
+    const ask = page.getByRole('dialog', { name: 'Delete Acme Septic?' });
     await ask.waitFor();
     assert.equal(await ask.locator('form > p').textContent(), 'Water heater will show Riverbend Property Care on its card instead.');
     await ask.locator('button[type=submit]').click();
@@ -526,7 +526,7 @@ export async function doneChecks({ browser, base, assert }) {
 export async function manualChecks({ browser, base, assert }) {
   const { ctx, L, errors, page } = await phone(browser, base);
   await ctx.addInitScript(u => localStorage.setItem('placard.ledger', JSON.stringify({ url: u, key: 'k'.repeat(40) })), LEDGER);
-  L.site = L.site.map(d => d.id === 'house' ? { ...d, numbers: [{ id: 'septic', name: 'Hudson Septic', phone: '845-555-0170', note: 'The septic alarm sounds.' }] }
+  L.site = L.site.map(d => d.id === 'house' ? { ...d, numbers: [{ id: 'septic', name: 'Acme Septic', phone: '800-555-0170', note: 'The septic alarm sounds.' }] }
     : d.id === 'water-heater' ? { ...d, call: 'septic', facts: [...d.facts, ['Anode', '']] } : d);
   try {
     await page.goto(base + '#/owner');
@@ -539,7 +539,7 @@ export async function manualChecks({ browser, base, assert }) {
       call: [...c.querySelectorAll('.pm-person')].map(p => p.textContent), qr: c.querySelector('.qr').dataset.url, printed: c.querySelector('.pm-printed').textContent,
       notes: [...c.querySelectorAll('section')].find(x => x.querySelector('h3')?.textContent === 'Good to know')?.querySelector('p')?.textContent }));
     assert.deepEqual(cover, { title: 'House manual', fire: 'Fire, smoke or a CO alarm: get everyone out, then call 911.',
-      call: ['Riverbend Property Care 555-0142 · help@example.com' + 'Call any time for a leak, no heat or no power. Text for anything else.', 'Hudson Septic 845-555-0170The septic alarm sounds.'],
+      call: ['Riverbend Property Care 555-0142 · help@example.com' + 'Call any time for a leak, no heat or no power. Text for anything else.', 'Acme Septic 800-555-0170The septic alarm sounds.'],
       qr: 'https://tag.junkdrawer.works/h/house', printed: `Printed ${today}. The live manual may be newer.`, notes: 'Trash goes out Monday night; recycling every other Thursday.' });
     const groups = await page.locator('.pm-group').evaluateAll(gs => gs.map(g => [g.querySelector('h2').textContent,
       [...g.querySelectorAll(':scope > .pm-page, :scope > .pm-see')].map(p => p.classList.contains('pm-see') ? p.textContent : `${p.querySelector('h3').textContent} (${p.querySelectorAll('ol.steps li').length} steps, ${p.querySelector('.qr').dataset.url.split('/').pop()})`)]));
@@ -552,7 +552,7 @@ export async function manualChecks({ browser, base, assert }) {
     // a page as a tenant reads it: no blank details; its own number, its job, its photo
     const wh = page.locator('.pm-page').filter({ has: page.locator('h3', { hasText: /^Water heater$/ }) });
     assert.deepEqual(await wh.locator('dt').allTextContents(), ['Make', 'Model', 'Installed', 'Breakers'], 'a blank detail on paper');
-    assert.equal(await wh.locator('.pm-person').textContent(), 'Who to call: Hudson Septic, 845-555-0170');
+    assert.equal(await wh.locator('.pm-person').textContent(), 'Who to call: Acme Septic, 800-555-0170');
     assert.deepEqual(await page.locator('.pm-group').first().locator('.pm-person').allTextContents(), Array(3).fill('Who to call: Riverbend Property Care, 555-0142'),
       'an emergency page on paper without the number its steps say to call');
     assert.equal(await page.locator('.pm-page', { hasText: 'Air handler, upstairs' }).locator('.done').textContent(), 'Last filter change: Aug 2, 2026. Every 3 months.');
