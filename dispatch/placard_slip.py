@@ -8,8 +8,9 @@ URL is the ledger's /exec address, the one in Placard's js/config.js. It reads t
 with no key.
 
 From Dispatch's own code:  from placard_slip import due_lines;  lines = due_lines(url)
-It returns [] when nothing is due, and never raises: a slip prints even if the ledger is down. It gives up after about
-25 seconds. A page is due once its Last done date and "every N months" (both set on the page in Placard) have come
+It returns [] when nothing is due, and ["Rental: manual didn't answer"] when it can't read the manual (so a morning
+with no Rental line means nothing is due, as Frostbite's "Freezer: ledger didn't answer"). It never raises: a slip
+prints even if the ledger is down. It gives up after about 25 seconds. A page is due once its Last done date and "every N months" (both set on the page in Placard) have come
 round, the same day Placard's Edit list shows its due chip: Last done Aug 31 and every 6 months is due Feb 28."""
 import calendar, datetime, json, re, socket, sys, textwrap, threading, time, urllib.error, urllib.parse, urllib.request
 
@@ -94,9 +95,15 @@ def slip(docs, width=32, today=None):
         out += wrap(f'Rental: {what} due (last {short(last, today).replace(" ", NB)})', width)
     return out
 
+NO_ANSWER = "Rental: manual didn't answer"   # the slip's line when the manual can't be read (why: run it by hand)
+
 def due_lines(url, width=32, today=None, deadline=DEADLINE):
     try:
-        return slip(read(url, deadline), width=width, today=today)
+        docs = read(url, deadline)
+    except Exception:
+        return [NO_ANSWER]
+    try:
+        return slip(docs, width=width, today=today)
     except Exception:
         return []
 

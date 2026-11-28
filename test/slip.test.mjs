@@ -69,6 +69,15 @@ const run = (...args) => new Promise((resolve, reject) => {
   p.on('close', status => { clearTimeout(t); resolve({ status, stdout, stderr }); });
 });
 
+// Python code as py() runs it, without holding up this process (for a pretend ledger answering from it)
+const pyAsync = code => new Promise((resolve, reject) => {
+  const p = spawn('python3', ['-B', '-c', `import sys, json, datetime; sys.path.insert(0, ${JSON.stringify(dir)})\n${code}`]);
+  let stdout = '', stderr = '';
+  p.stdout.on('data', d => { stdout += d; }); p.stderr.on('data', d => { stderr += d; });
+  const t = setTimeout(() => { p.kill(); reject(new Error('python took over 60 s')); }, 60000);
+  p.on('close', status => { clearTimeout(t); status ? reject(new Error(stderr)) : resolve({ stdout }); });
+});
+
 test('run by hand on the Pi: the lines, or (nothing due), or a Ledger: line for an address that is not the ledger', async () => {
   let L = await ledger({ ok: true, docs: DOCS });
   try {
@@ -89,7 +98,30 @@ test('run by hand on the Pi: the lines, or (nothing due), or a Ledger: line for 
   const p = await run(gone.url);
   assert.equal(p.status, 1);
   assert.match(p.stdout, /^Ledger: couldn't reach it \(/);
-  // and from Dispatch's own code it never raises: no lines
-  assert.equal(py(`from placard_slip import due_lines
-print(json.dumps(due_lines(${JSON.stringify(gone.url)}, deadline=5)))`).trim(), '[]');
+  // and from Dispatch's own code it never raises: one line saying the manual couldn't be read, as the freezer's
+  // "Freezer: ledger didn't answer", so a morning with no Rental line means nothing is due
+  const lines = async url => JSON.parse((await pyAsync(`from placard_slip import due_lines
+print(json.dumps(due_lines(${JSON.stringify(url)}, deadline=5)))`)).stdout);
+  const NO = ["Rental: manual didn't answer"];
+  assert.ok(NO[0].length <= 32);
+  assert.deepEqual(await lines(gone.url), NO, 'nothing answering');
+  for (const answer of [{ ok: false, error: 'not public' }, { html: true }, { ok: false, error: 'the sheet has no placard.site tab' }]) {
+    L = await ledger(answer);
+    try { assert.deepEqual(await lines(L.url), NO, JSON.stringify(answer)); } finally { await L.close(); }
+  }
+  L = await ledger({ ok: true, docs: [{ id: 'house' }, { id: 'washer', name: 'Washer', every: 6 }] });
+  try { assert.deepEqual(await lines(L.url), [], 'read, and nothing due: no lines'); } finally { await L.close(); }
+});
+
+test('from Dispatch\'s code, a manual that never answers gives the one line after the deadline', async () => {
+  const held = [];
+  const srv = createServer((req, res) => held.push(res));
+  await new Promise(r => srv.listen(0, '127.0.0.1', r));
+  try {
+    const url = `http://127.0.0.1:${srv.address().port}/macros/s/TEST/exec`;
+    const out = JSON.parse((await pyAsync(`from placard_slip import due_lines
+import time; t = time.monotonic(); lines = due_lines(${JSON.stringify(url)}, deadline=1.5); print(json.dumps([lines, round(time.monotonic() - t, 1)]))`)).stdout);
+    assert.deepEqual(out[0], ["Rental: manual didn't answer"]);
+    assert.ok(out[1] < 3, `took ${out[1]} s`);
+  } finally { held.forEach(r => r.destroy()); srv.close(); }
 });
