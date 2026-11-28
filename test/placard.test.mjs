@@ -202,6 +202,20 @@ test('a saved copy imported: pages deleted here since, or whose sticker was sent
   assert.deepEqual(mergeImport(docs, id => here[id] || null, gone).back, [], 'an import file that isn\'t a copy offered a deleted page back');
 });
 
+test('a saved copy imported over a page here never brings back its sticker\'s days: a new sticker written since stays unlocked', () => {
+  const here = { 'water-heater': { id: 'water-heater', name: 'Water heater', where: 'Basement', tagged: '2026-12-01', locked: null, spare: '2026-12-02', spareLocked: null } };
+  const copy = { id: 'water-heater', name: 'Water heater', where: 'Basement', tagged: '2026-11-01', locked: '2026-11-02', spare: '2026-11-03', spareLocked: '2026-11-04' };
+  const r = mergeImport([copy], id => here[id] || null, () => false, { back: true });
+  assert.deepEqual([r.puts, r.res.filled], [[], 0], 'the copy\'s old lock went back over the sticker written since: ' + JSON.stringify(r.puts));
+  // with words to fill in, the page goes in with this phone's sticker days
+  const [put] = mergeImport([{ ...copy, summary: 'Gas, 40 gallons.' }], id => here[id] || null, () => false, { back: true }).puts;
+  assert.deepEqual([put.summary, put.tagged, put.locked, put.spare, put.spareLocked], ['Gas, 40 gallons.', '2026-12-01', null, '2026-12-02', null]);
+  // a page brought back whole, or added new, keeps the file's
+  const gone = mergeImport([copy], () => null, () => true, { back: true });
+  assert.equal(gone.back[0].locked, '2026-11-02');
+  assert.equal(mergeImport([copy], () => null, () => false).puts[0].locked, '2026-11-02');
+});
+
 test('an import never turns a page into a sticker sent to another page, nor adds one: a record with "to" is skipped and named', () => {
   const here = { 'water-heater': { id: 'water-heater', name: 'Water heater', where: 'Basement' } };
   const docs = [{ id: 'water-heater', name: 'Water heater', to: 'house' }, { id: 'old-furnace', name: 'Old furnace', to: 'heat-pump' },

@@ -218,10 +218,15 @@ export function mergeFacts(here, file) {
   return { value, filled, kept };
 }
 
+// A page here keeps its own sticker days: when its sticker (and the spare) were written and locked say what's on the
+// wall now, and a file's older ones would mark a sticker written since as locked (no Lock button for it).
+const keepHere = was => ({ value: was });
+const STICKER = { tagged: keepHere, locked: keepHere, spare: keepHere, spareLocked: keepHere };
 // An import file's pages over this phone's. here(id) is the page here, gone(id) true for one deleted here. Each page
 // only fills in (the kit's fillIn): a Where line, a contact field or a detail typed here is never blanked or replaced,
-// and a page deleted here stays deleted. Returns { puts, res, back } (res for the kit's importSummary). With back (the
-// file is a saved copy), a page deleted here goes in back instead, whole, for the app to offer to bring back.
+// its sticker days are this phone's, and a page deleted here stays deleted. Returns { puts, res, back } (res for the
+// kit's importSummary). With back (the file is a saved copy), a page deleted here goes in back instead, whole, for the
+// app to offer to bring back.
 export function mergeImport(docs, here, gone, { back = false } = {}) {
   const puts = [], mine = {}, res = { added: 0, filled: 0, kept: 0, gone: 0, skipped: [] }, offer = [];
   for (const d of docs) {
@@ -242,7 +247,7 @@ export function mergeImport(docs, here, gone, { back = false } = {}) {
       continue;
     }
     const was = mine[id] || here(id);
-    const { doc, filled, kept } = was ? fillIn(was, c.rec, { facts: mergeFacts }) : { doc: c.rec, filled: [], kept: [] };
+    const { doc, filled, kept } = was ? fillIn(was, c.rec, { facts: mergeFacts, ...STICKER }) : { doc: c.rec, filled: [], kept: [] };
     if (id !== 'house' && (typeof doc.name !== 'string' || !doc.name.trim())) { res.skipped.push(`"${id}" (no name)`); continue; }
     if (refusal(doc)) { res.skipped.push(`"${id}" (too big to save)`); continue; }
     if (!was) res.added++; else if (filled.length && !mine[id]) res.filled++;
