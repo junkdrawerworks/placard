@@ -403,9 +403,12 @@ export async function ownerChecks({ browser, base, assert }) {
       assert.equal(await page.evaluate(() => window.__nfc.locks), 0, 'locked a sticker that isn\'t this page\'s: ' + held);
       assert.match(await state(), /not locked yet\.$/);
     }
-    // its own sticker: locked
+    // its own sticker: locked. The question ends with the way a locked page's sticker is sent elsewhere, as the locked
+    // line does: deleting the page here
     await page.evaluate(() => window.__nfc.hold('https://tag.junkdrawer.works/h/water-heater'));
     await page.click('text=Lock sticker');
+    assert.equal(await page.locator('dialog[open] form > p').textContent(), 'Locking is permanent: nobody can rewrite it, you included. Do it only after a tap opens the right page. '
+      + 'To send it to another page, delete this one (Edit this page, then Delete) and pick where its sticker goes.');
     await page.click('dialog >> text=Lock it');
     await page.waitForFunction(() => window.__nfc.locks === 1);
     // locked: no Write or Lock to press by mistake, and where a change of address is made instead
@@ -474,6 +477,9 @@ export async function ownerChecks({ browser, base, assert }) {
     await page.waitForFunction(() => window.__nfc.writes.length === 5);
     await page.waitForFunction(() => /not locked yet\.$/.test(document.querySelector('.front-tag .state')?.textContent));
     await front.locator('text=Lock sticker').click();
+    // the front page can't be deleted: OVERRIDES, as its locked line says
+    assert.equal(await page.locator('dialog[open] form > p').textContent(), 'Locking is permanent: nobody can rewrite it, you included. Do it only after a tap opens the right page. '
+      + 'To send it somewhere else, add it to OVERRIDES in Switchboard\'s 404.html.');
     await page.click('dialog >> text=Lock it');
     await page.waitForFunction(() => window.__nfc.locks === 3);
     await page.waitForFunction(() => /^Locked /.test(document.querySelector('.front-tag .state')?.textContent));
