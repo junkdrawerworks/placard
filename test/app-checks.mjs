@@ -19,7 +19,8 @@ const fakeNfc = () => {
 // the script); L.hang: Google takes each request and never answers (one bar); L.emailed: what a report's answer says;
 // L.dropPub: how many of the next tenant reads (pub) drop their connection; L.pubGone: the manual's tab renamed or
 // deleted in the sheet (the ledger says so); L.repeat: a report's answer says the same
-// words went from that page at this time (an ISO string), as the ledger does for a second send within the hour. The service worker is off, so every request reaches the routes.
+// words went from that page at this time (an ISO string), as the ledger does for a second send within the hour, and
+// L.firstEmailed whether that first one was emailed. The service worker is off, so every request reaches the routes.
 // published: the address put in js/config.js (true: LEDGER). OTHER is another deployment that answers with the same
 // pages; any other script.google.com address answers 404, as a mistyped or archived one does.
 const OTHER = 'https://script.google.com/macros/s/AKfyOTHER/exec';
@@ -51,7 +52,7 @@ async function phone(browser, base, { published = true, dark = false } = {}) {
     if (req.method() === 'GET' && L.pubGone && new URL(req.url()).searchParams.get('op') === 'pub') return json({ ok: false, error: 'the sheet has no placard.site tab' });
     if (req.method() === 'GET') return json(new URL(req.url()).searchParams.get('op') === 'pub' ? { ok: true, docs: L.site } : { ok: true, app: 'switchboard-ledger', version: '1.1' });
     const b = JSON.parse(req.postData() || '{}');
-    if (b.op === 'report') { L.reports.push(b.doc); return json(L.repeat ? { ok: true, emailed: false, repeat: true, firstAt: L.repeat } : { ok: true, emailed: L.emailed }); }
+    if (b.op === 'report') { L.reports.push(b.doc); return json(L.repeat ? { ok: true, emailed: false, repeat: true, firstAt: L.repeat, ...(L.firstEmailed != null ? { firstEmailed: L.firstEmailed } : {}) } : { ok: true, emailed: L.emailed }); }
     if (b.op === 'batch') {
       for (const o of b.ops) if (o.op === 'put' && o.coll === 'site') { L.puts.push(o.doc); L.site = L.site.filter(d => d.id !== o.id).concat({ ...o.doc, id: o.id }); }
       return json({ ok: true, results: b.ops.map(o => ({ ok: true, id: o.id, updated: Date.now() })) });
@@ -153,7 +154,14 @@ export async function tenantChecks({ browser, base, assert }) {
     assert.equal(await page.locator('dialog[open]').count(), 0);
     assert.equal(await text('.sent'), `Already sent at ${first}. If it's urgent, call.`);
     assert.equal(L.reports.length, 3);
-    L.repeat = null;
+    // and when that first one was only kept, never emailed (the day's 20 used up), the page doesn't say it went
+    L.firstEmailed = false;
+    await page.click('text=Report a problem');
+    await page.fill('dialog[open] #f-text', 'The porch light is out.');
+    await page.click('dialog[open] button[type=submit]');
+    await page.waitForSelector(`.toast.show >> text=Already saved at ${first}, but it wasn't emailed. If it's urgent, call.`);
+    assert.equal(await text('.sent'), `Already saved at ${first}, but it wasn't emailed. If it's urgent, call.`);
+    L.repeat = null; L.firstEmailed = null;
     // a sticker whose page was deleted still helps: who to call, the form and the way to the front page
     await page.goto(base + '#old-boiler');
     await page.waitForSelector('text=This sticker\'s page isn\'t in the manual yet.');

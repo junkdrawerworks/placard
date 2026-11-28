@@ -193,8 +193,8 @@ const keepDraft = (key, v) => {
   jset(DRAFTS, all);
 };
 // Sends a report from this page (s: the page, or null for the front page); resolves to what the ledger said
-// ({ emailed, repeat, firstAt }: repeat when the same words went from this page in the last hour, and weren't emailed
-// again), or throws if it didn't go. The draft goes once the ledger has it. One send per page at a time: a form closed
+// ({ emailed, repeat, firstAt, firstEmailed }: repeat when the same words went from this page in the last hour, and
+// weren't emailed again; firstEmailed false when that first one wasn't emailed either), or throws if it didn't go. The draft goes once the ledger has it. One send per page at a time: a form closed
 // while its report is on the way leaves the line under the button saying Sending…, so the same report can't go twice.
 const sending = {};
 function sendReport(s, v, website = '') {
@@ -205,14 +205,16 @@ function sendReport(s, v, website = '') {
     const j = demo ? ledger.demo.handle({ op: 'report', app: 'placard', coll: 'reports', doc })
       : await publicReport(owner() ? ledger.cfg.url : LEDGER_URL, 'placard', 'reports', doc);
     const done = { at: Date.now(), emailed: j?.emailed !== false };  // a ledger script before 1.1 doesn't say: it always tried
-    if (j?.repeat) Object.assign(done, { repeat: true, firstAt: Date.parse(j.firstAt) || 0 });
+    if (j?.repeat) Object.assign(done, { repeat: true, firstAt: Date.parse(j.firstAt) || 0, firstEmailed: j.firstEmailed !== false });
     keepDraft(key, null);
     sent[key] = done;
     try { sessionStorage.setItem('placard.sent', JSON.stringify(sent)); } catch {}
     return done;
   })()).finally(() => { delete sending[key]; render(); });
 }
-const already = d => d.firstAt ? `Already sent at ${clock(d.firstAt)}. If it's urgent, call.` : 'Already sent. If it\'s urgent, call.';
+// A repeat: when the first went, and whether it was emailed (the ledger kept it without an email past the day's 20, say)
+const already = d => d.firstEmailed === false ? `Already saved${d.firstAt ? ` at ${clock(d.firstAt)}` : ''}, but it wasn't emailed. If it's urgent, call.`
+  : d.firstAt ? `Already sent at ${clock(d.firstAt)}. If it's urgent, call.` : 'Already sent. If it\'s urgent, call.';
 const sentToast = d => toast(d.repeat ? already(d) : d.emailed ? 'Sent. The owner gets it by email.' : 'Saved for the owner. If it\'s urgent, call.');
 const failLine = err => /too many/.test(err.message) ? 'Too many reports this hour. Your message is kept: please call.' : 'Couldn\'t send it. Your message is kept: try again, or call.';
 // "No hot water since the power cut this…"
